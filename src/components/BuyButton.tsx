@@ -38,7 +38,7 @@ export function BuyButton({ label, configured, tier, primary = true }: { label: 
         currency: order.currency,
         name: order.name,
         description: order.description,
-        theme: { color: "#4f46e5" },
+        theme: { color: "#74223a" },
         handler: async (resp: Record<string, string>) => {
           const v = await fetch("/api/checkout/verify", {
             method: "POST",
@@ -72,7 +72,7 @@ export function BuyButton({ label, configured, tier, primary = true }: { label: 
         {busy ? "Opening checkout…" : label}
       </button>
       {!configured && <p className="mt-2 text-xs muted">Payments are not configured yet on this deployment.</p>}
-      {error && <p className="mt-2 text-sm" style={{ color: "#dc2626" }}>{error}</p>}
+      {error && <p className="mt-2 text-sm" style={{ color: "var(--bad)" }}>{error}</p>}
     </div>
   );
 }

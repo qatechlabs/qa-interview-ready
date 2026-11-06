@@ -4,10 +4,25 @@ import { useProgress } from "@/lib/progress";
 import type { QuestionSummary } from "@/content/types";
 import { LEVELS, TOPICS, levelMeta } from "@/content/meta";
 import { useMockHistory, scoreOf, weakTopics } from "@/lib/mock";
+import { clearLabProgress, useLabRuns } from "@/lib/lab/progress";
 
-export function ProgressDashboard({ summaries }: { summaries: QuestionSummary[] }) {
+export interface LabSummary {
+  id: string;
+  title: string;
+  app: string;
+  free: boolean;
+}
+
+export function ProgressDashboard({ summaries, labs = [] }: { summaries: QuestionSummary[]; labs?: LabSummary[] }) {
   const { state, reset } = useProgress();
   const { rounds, clear: clearRounds } = useMockHistory();
+  const labRuns = useLabRuns();
+  const labById = new Map(labs.map((l) => [l.id, l]));
+  const labsPassed = labs.filter((l) => labRuns[l.id]?.passedAt).length;
+  const recentRuns = Object.entries(labRuns)
+    .filter(([id]) => labById.has(id))
+    .sort((a, b) => b[1].lastAt - a[1].lastAt)
+    .slice(0, 8);
   const weak = weakTopics(rounds).slice(0, 4);
   const byId = new Map(summaries.map((s) => [s.id, s]));
   const list = (bucket: Record<string, number>) =>
@@ -69,6 +84,32 @@ export function ProgressDashboard({ summaries }: { summaries: QuestionSummary[] 
           )}
         </div>
       </section>
+      <section className="card p-5">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="font-semibold">🧪 Live labs <span className="muted">({labsPassed}/{labs.length} passed)</span></h2>
+          <Link href="/labs" className="text-sm accent hover:underline">All labs →</Link>
+        </div>
+        {recentRuns.length ? (
+          <ul className="mt-3 divide-y text-sm" style={{ borderColor: "var(--border)" }}>
+            {recentRuns.map(([id, r]) => {
+              const lab = labById.get(id)!;
+              return (
+                <li key={id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2" style={{ borderColor: "var(--border)" }}>
+                  <span className="w-20 font-semibold" style={{ color: r.lastOk ? "var(--good)" : "var(--bad)" }}>{r.lastOk ? "✓ Passed" : "✗ Not yet"}</span>
+                  <Link href={`/labs/${id}`} className="min-w-0 flex-1 truncate hover:underline">
+                    <span className="muted">{lab.app} · </span>{lab.title}
+                  </Link>
+                  <span className="muted">
+                    {r.lastTests} tests · {r.lastMode === "github" ? "GitHub Actions" : "browser"} · {r.runs} run{r.runs === 1 ? "" : "s"} · {new Date(r.lastAt).toLocaleDateString()}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <p className="mt-2 text-sm muted">No lab runs yet. <Link href="/labs" className="underline">Open a lab</Link> and press Run; every run is recorded here, passed or not.</p>
+        )}
+      </section>
       {sections.map(([title, items]) => (
         <section key={title}>
           <h2 className="mb-2 font-semibold">{title} <span className="muted">({items.length})</span></h2>
@@ -87,7 +128,7 @@ export function ProgressDashboard({ summaries }: { summaries: QuestionSummary[] 
       ))}
       <p className="text-xs muted">
         Progress is saved in this browser only.{" "}
-        <button className="underline" onClick={() => { if (confirm("Clear all progress in this browser?")) { reset(); clearRounds(); } }}>Reset progress</button>
+        <button className="underline" onClick={() => { if (confirm("Clear all progress in this browser?")) { reset(); clearRounds(); clearLabProgress(); } }}>Reset progress</button>
       </p>
     </div>
   );

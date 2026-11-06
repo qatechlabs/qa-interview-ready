@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getScenario, isFramework, isRemote, isWorkspace, labApp, MAIN_FILE, starterFiles } from "@/lab/scenarios";
 import type { LogEntry, RunResult } from "@/lib/lab/runtime";
-import { markLabPassed } from "@/lib/lab/progress";
+import { recordLabRun } from "@/lib/lab/progress";
 import { SITE } from "@/lib/config";
 import type { ReportModel, ReportTest } from "@/lib/lab/report";
 import { appendLiveLog, downloadBlob, loadPrefs, modelFromLog, openReportWindow, savePrefs, showReport, type RunPrefs } from "@/lib/lab/runReport";
@@ -223,7 +223,7 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
   );
 
   const finish = useCallback(
-    (result: RunResult, push: (e: LogEntry) => void, extra: { lab: unknown; url: string; doc: Document | null }) => {
+    (result: RunResult, push: (e: LogEntry) => void, extra: { lab: unknown; url: string; doc: Document | null; mode: "browser" | "github" }) => {
       const allCode = Object.values(files).join("\n");
       const ctx = { ...extra, result, code: allCode, files };
       const rows: CheckRow[] = [
@@ -254,7 +254,7 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
             ? `${passedTests}/${result.tests.length} tests passed · ${result.assertions.passed} assertion${result.assertions.passed === 1 ? "" : "s"} passed, ${result.assertions.failed} failed · ${(result.durationMs / 1000).toFixed(1)}s`
             : `${passedTests}/${result.tests.length} tests passed · ${(result.durationMs / 1000).toFixed(1)}s`,
       });
-      if (pass) markLabPassed(id);
+      recordLabRun(id, { ok: pass, mode: extra.mode, passedTests, totalTests: result.tests.length });
       return { pass, passedTests, rows };
     },
     [files, scenario, id],
@@ -345,7 +345,7 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
           durationMs: r.durationMs || Date.now() - started,
         };
         if (!tests.length && !r.error) push({ kind: "error", text: "No tests were found. Test files must be named *.spec.ts." });
-        const { rows } = finish(result, push, { lab: null, url: "", doc: null });
+        const { rows } = finish(result, push, { lab: null, url: "", doc: null, mode: "github" });
         const reportTests: ReportTest[] = (r.tests || []).map((t) => ({
           name: t.name,
           status: t.ok ? "passed" : "failed",
@@ -447,7 +447,7 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
     } catch {
       /* ignore */
     }
-    const { pass, passedTests, rows } = finish(result, push, { lab, url: pageUrl, doc: f.contentDocument });
+    const { pass, passedTests, rows } = finish(result, push, { lab, url: pageUrl, doc: f.contentDocument, mode: "browser" });
     setRunning(false);
     void commitToGitHub(files, `${passedTests}/${result.tests.length} tests passed${pass ? ", scenario passed" : ""}`);
     const resolved = new Map<number, string | null>();
@@ -624,7 +624,7 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
                 )}
                 <button onClick={resetCode} className="btn btn-ghost !px-2.5 !py-1 text-xs" disabled={running}>Reset</button>
                 {running ? (
-                  <button onClick={stop} className="btn !px-3 !py-1 text-xs" style={{ background: "#e11d48", color: "#fff" }}>■ Stop</button>
+                  <button onClick={stop} className="btn !px-3 !py-1 text-xs" style={{ background: "var(--bad)", color: "#fff" }}>■ Stop</button>
                 ) : (
                   <>
                     {!remote && (
@@ -672,7 +672,7 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
                   </ul>
                   <div className="mt-auto hidden gap-2 px-2 py-1.5 text-[11px] sm:flex">
                     <button onClick={renameFile} className="accent hover:underline" disabled={running}>Rename</button>
-                    <button onClick={deleteFile} className="hover:underline" style={{ color: "#e11d48" }} disabled={running || paths.length <= 1}>Delete</button>
+                    <button onClick={deleteFile} className="hover:underline" style={{ color: "var(--bad)" }} disabled={running || paths.length <= 1}>Delete</button>
                   </div>
                 </aside>
               )}
@@ -751,7 +751,7 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
                       ✓ {commit.unchanged ? "Already committed" : `Committed ${commit.sha.slice(0, 7)}`} ↗
                     </a>
                   )}
-                  {commit.status === "error" && <span className="chip" style={{ color: "#e11d48" }}>✗ {commit.error}</span>}
+                  {commit.status === "error" && <span className="chip" style={{ color: "var(--bad)" }}>✗ {commit.error}</span>}
                   <form action="/api/github/signout" method="post" className="ml-auto" onSubmit={async (e) => { e.preventDefault(); await fetch("/api/github/signout", { method: "POST" }); location.reload(); }}>
                     <button className="muted hover:underline">Sign out</button>
                   </form>
@@ -843,7 +843,7 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
                   </>
                 )}
                 {verdict === "pass" && <span className="chip" style={{ color: "var(--good)" }}>✓ Scenario passed</span>}
-                {verdict === "fail" && <span className="chip" style={{ color: "#e11d48" }}>✗ Not yet</span>}
+                {verdict === "fail" && <span className="chip" style={{ color: "var(--bad)" }}>✗ Not yet</span>}
               </div>
             </div>
             <div className="max-h-56 overflow-auto rounded-lg p-2 font-mono text-[12px] leading-relaxed" style={{ background: "var(--surface-2)" }}>
@@ -858,10 +858,10 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
               )}
               {log.map((e, i) => (
                 <div key={i} className="flex gap-2 whitespace-pre-wrap break-words">
-                  <span aria-hidden style={{ color: e.kind === "pass" ? "var(--good)" : e.kind === "fail" || e.kind === "error" ? "#e11d48" : "var(--muted)" }}>
+                  <span aria-hidden style={{ color: e.kind === "pass" ? "var(--good)" : e.kind === "fail" || e.kind === "error" ? "var(--bad)" : "var(--muted)" }}>
                     {e.kind === "pass" ? "✓" : e.kind === "fail" || e.kind === "error" ? "✗" : e.kind === "test" ? "▸" : e.kind === "step" ? "·" : "i"}
                   </span>
-                  <span className={e.kind === "test" ? "font-semibold" : ""} style={e.kind === "error" ? { color: "#e11d48" } : undefined}>
+                  <span className={e.kind === "test" ? "font-semibold" : ""} style={e.kind === "error" ? { color: "var(--bad)" } : undefined}>
                     {e.text}
                     {e.ms !== undefined && e.ms > 20 && <span className="muted"> {e.ms}ms</span>}
                   </span>
@@ -875,7 +875,7 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
                 <ul className="space-y-1 text-sm">
                   {checks.map((c) => (
                     <li key={c.label} className="flex gap-2">
-                      <span aria-hidden style={{ color: c.ok ? "var(--good)" : "#e11d48" }}>{c.ok ? "✓" : "✗"}</span>
+                      <span aria-hidden style={{ color: c.ok ? "var(--good)" : "var(--bad)" }}>{c.ok ? "✓" : "✗"}</span>
                       <span className={c.ok ? "" : "font-medium"}>{c.label}</span>
                       <span className="sr-only">{c.ok ? "passed" : "failed"}</span>
                     </li>

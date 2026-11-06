@@ -27,7 +27,7 @@ export function RestoreForm() {
       <input required type="email" placeholder="Email used at checkout" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-sm" style={{ borderColor: "var(--border)", background: "var(--surface)" }} />
       <input required placeholder="Payment ID (starts with pay_)" value={paymentId} onChange={(e) => setPaymentId(e.target.value.trim())} className="w-full rounded-lg border px-3 py-2 font-mono text-sm" style={{ borderColor: "var(--border)", background: "var(--surface)" }} />
       <button className="btn btn-ghost w-full" disabled={busy}>{busy ? "Checking…" : "Restore access"}</button>
-      {msg && <p className="text-sm" style={{ color: "#dc2626" }}>{msg}</p>}
+      {msg && <p className="text-sm" style={{ color: "var(--bad)" }}>{msg}</p>}
     </form>
   );
 }

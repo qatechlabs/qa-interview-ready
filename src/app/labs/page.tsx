@@ -69,7 +69,7 @@ export default async function LabsIndex({ searchParams }: { searchParams?: { git
             <>
               <p className="flex-1">
                 <b>Build a portfolio while you practise.</b> Sign in with GitHub and every lab run is committed to a repo in your name under {ghCfg.org}.
-                {ghError && <span className="ml-2" style={{ color: "#e11d48" }}>{ghError}</span>}
+                {ghError && <span className="ml-2" style={{ color: "var(--bad)" }}>{ghError}</span>}
               </p>
               <a href="/api/github/login?next=%2Flabs" className="btn btn-primary">Sign in with GitHub</a>
             </>

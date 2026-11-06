@@ -2,7 +2,7 @@ export const SITE = {
   name: "QA Interview Ready",
   tagline: "Interview prep for QA engineers, from fresher to architect",
   url: process.env.NEXT_PUBLIC_SITE_URL || "https://interview.qatechlabs.com",
-  supportEmail: process.env.NEXT_PUBLIC_SUPPORT_EMAIL || "support@qatechlabs.com",
+  supportEmail: process.env.NEXT_PUBLIC_SUPPORT_EMAIL || "karthik@qatechlabs.com",
   businessName: process.env.NEXT_PUBLIC_BUSINESS_NAME || "QA Tech Labs",
 };
 

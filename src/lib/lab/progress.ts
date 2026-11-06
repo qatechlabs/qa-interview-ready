@@ -2,6 +2,20 @@
 import { useEffect, useState } from "react";
 
 const KEY = "qir_lab_passed_v1";
+const RUNS_KEY = "qir_lab_runs_v1";
+const EVENT = "qir-lab-progress";
+
+export interface LabRunRecord {
+  /** number of runs of this lab in this browser */
+  runs: number;
+  lastAt: number;
+  /** verdict of the last run */
+  lastOk: boolean;
+  lastMode: "browser" | "github";
+  lastTests: string;
+  /** first time the scenario passed, if ever */
+  passedAt?: number;
+}
 
 function read(): Record<string, number> {
   try {
@@ -10,6 +24,14 @@ function read(): Record<string, number> {
     return {};
   }
 }
+function readRuns(): Record<string, LabRunRecord> {
+  try {
+    return JSON.parse(localStorage.getItem(RUNS_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+const notify = () => window.dispatchEvent(new Event(EVENT));
 
 export function markLabPassed(id: string) {
   try {
@@ -18,23 +40,63 @@ export function markLabPassed(id: string) {
       cur[id] = Date.now();
       localStorage.setItem(KEY, JSON.stringify(cur));
     }
-    window.dispatchEvent(new Event("qir-lab-progress"));
+    notify();
   } catch {
     /* storage unavailable */
   }
 }
 
-export function useLabPassed() {
-  const [passed, setPassed] = useState<Record<string, number>>({});
+/** Records every run (passed or not) so the Progress page shows what was attempted and when. */
+export function recordLabRun(id: string, run: { ok: boolean; mode: "browser" | "github"; passedTests: number; totalTests: number }) {
+  try {
+    const all = readRuns();
+    const prev = all[id];
+    all[id] = {
+      runs: (prev?.runs || 0) + 1,
+      lastAt: Date.now(),
+      lastOk: run.ok,
+      lastMode: run.mode,
+      lastTests: `${run.passedTests}/${run.totalTests}`,
+      passedAt: prev?.passedAt || (run.ok ? Date.now() : undefined),
+    };
+    localStorage.setItem(RUNS_KEY, JSON.stringify(all));
+    if (run.ok) markLabPassed(id);
+    else notify();
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+function useStore<T>(reader: () => T, empty: T) {
+  const [value, setValue] = useState<T>(empty);
   useEffect(() => {
-    const sync = () => setPassed(read());
+    const sync = () => setValue(reader());
     sync();
-    window.addEventListener("qir-lab-progress", sync);
+    window.addEventListener(EVENT, sync);
     window.addEventListener("storage", sync);
     return () => {
-      window.removeEventListener("qir-lab-progress", sync);
+      window.removeEventListener(EVENT, sync);
       window.removeEventListener("storage", sync);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  return passed;
+  return value;
+}
+
+export function useLabPassed() {
+  return useStore(read, {});
+}
+
+export function useLabRuns() {
+  return useStore(readRuns, {});
+}
+
+export function clearLabProgress() {
+  try {
+    localStorage.removeItem(KEY);
+    localStorage.removeItem(RUNS_KEY);
+    notify();
+  } catch {
+    /* ignore */
+  }
 }

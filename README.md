@@ -88,6 +88,10 @@ To change the price, update `PRICE_AMOUNT` (in paise). To change how many questi
 | `npm run lint` | ESLint |
 | `npm run content` | Convert `content/*.md` to JSON and validate it |
 
+## Theme
+
+Dark-only, sharing the palette of karthik.qatechlabs.com (midnight navy, burgundy bloom, rose-gold accent, warm paper text). The tokens live in `src/app/globals.css` (`--bg`, `--surface`, `--accent`, `--good`, `--warn`, `--bad`, ...); components use the tokens, never raw colours. The run report uses the same palette; the Word evidence document stays white for printing. Contact email defaults to karthik@qatechlabs.com (`NEXT_PUBLIC_SUPPORT_EMAIL` overrides).
+
 ## Pricing tiers
 
 Three cumulative one-time tiers (`TIERS` in `src/lib/config.ts`): **Prep** (all questions), **Pro** (Prep + every lab) and **Architect** (Pro + the framework workspaces). Amounts come from `PRICE_PREP_AMOUNT` / `PRICE_PRO_AMOUNT` / `PRICE_ARCHITECT_AMOUNT` (paise; `PRICE_AMOUNT` still sets Prep). The Razorpay order note `product` identifies the tier (`qir-prep`, `qir-pro`, `qir-architect`; the pre-tier `qir-lifetime` counts as Architect) and the access cookie carries `tier`. An upgrade creates an order for the difference with `upgrade_from: <payment id>`, which verification follows back to the original payment. Pages gate with `hasTier("pro")` for labs and `hasTier("architect")` for workspaces; questions need any tier.

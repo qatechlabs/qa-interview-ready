@@ -3,40 +3,56 @@
 @tailwind utilities;
 
 :root {
-  --bg: #f8fafc;
-  --surface: #ffffff;
-  --surface-2: #f1f5f9;
-  --border: #e2e8f0;
-  --text: #0f172a;
-  --muted: #475569;
-  --accent: #4f46e5;
-  --accent-fg: #ffffff;
-  --accent-soft: #eef2ff;
-  --good: #059669;
-  --warn: #d97706;
-  color-scheme: light;
-}
+  /* Palette shared with karthik.qatechlabs.com: midnight navy, burgundy depth, rose-gold accents, warm paper neutrals. */
+  --navy-950: #080f1d;
+  --navy-900: #0c1629;
+  --navy-850: #101c33;
+  --navy-800: #15233e;
+  --navy-700: #1e2f50;
+  --navy-600: #2b3f66;
+  --burgundy-800: #5a1a2b;
+  --burgundy-700: #74223a;
+  --burgundy-600: #8e2c47;
+  --rose-300: #e8c6b3;
+  --rose-400: #dbad96;
+  --rose-500: #c9967e;
+  --paper-50: #f8f4ef;
+  --paper-100: #efe9e2;
+  --mist-300: #b9c0ce;
+  --mist-400: #939db1;
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0b1020;
-    --surface: #111833;
-    --surface-2: #18213f;
-    --border: #253055;
-    --text: #e6e9f5;
-    --muted: #9aa4c4;
-    --accent: #818cf8;
-    --accent-fg: #0b1020;
-    --accent-soft: #1d2550;
-    --good: #34d399;
-    --warn: #fbbf24;
-    color-scheme: dark;
-  }
+  --bg: var(--navy-950);
+  --surface: var(--navy-900);
+  --surface-2: var(--navy-850);
+  --border: var(--navy-700);
+  --text: var(--paper-100);
+  --muted: var(--mist-300);
+  --accent: var(--rose-400);
+  --accent-fg: var(--navy-950);
+  --accent-soft: color-mix(in oklab, var(--rose-500) 18%, var(--navy-900));
+  --good: #7fd3a4;
+  --warn: #e9c46a;
+  --bad: #f09a93;
+  color-scheme: dark;
 }
 
 body {
-  background: var(--bg);
   color: var(--text);
+  /* deep navy with a faint burgundy bloom, as on the portfolio */
+  background:
+    radial-gradient(60rem 40rem at 85% -10%, color-mix(in oklab, var(--burgundy-800) 45%, transparent), transparent 70%),
+    radial-gradient(50rem 30rem at -10% 10%, color-mix(in oklab, var(--navy-700) 55%, transparent), transparent 70%),
+    var(--bg);
+  background-attachment: fixed;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--rose-500) 40%, transparent);
+  color: var(--paper-50);
+}
+:focus-visible {
+  outline: 2px solid var(--rose-400);
+  outline-offset: 2px;
 }
 
 .card {
@@ -79,10 +95,7 @@ body {
   @apply overflow-x-auto p-4 text-[13px] leading-relaxed;
   background: var(--surface-2) !important;
 }
-.code-block pre span { color: var(--shiki-light); }
-@media (prefers-color-scheme: dark) {
-  .code-block pre span { color: var(--shiki-dark); }
-}
+.code-block pre span { color: var(--shiki-dark); }
 
 .flip-enter { animation: fadeUp 0.25s ease-out; }
 @keyframes fadeUp {
