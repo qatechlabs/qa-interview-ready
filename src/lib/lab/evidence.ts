@@ -104,7 +104,7 @@ export async function buildEvidenceDocx(m: ReportModel): Promise<Blob> {
       { title: "Test outcomes", centre: `${a.rate}%`, sub: "pass rate", palette: pal },
     ),
     420,
-    200,
+    234,
     "Figure A · Test outcomes",
   );
   await addChart(
@@ -118,7 +118,7 @@ export async function buildEvidenceDocx(m: ReportModel): Promise<Blob> {
       { title: "Steps by type", centre: String(a.stepsTotal), sub: "steps", palette: pal },
     ),
     420,
-    200,
+    234,
     "Figure B · Steps by type",
   );
   const stepsRows = a.rows.map((r) => ({ label: r.name, values: [r.steps - r.failedSteps, r.failedSteps], note: `${r.steps} step${r.steps === 1 ? "" : "s"}` }));

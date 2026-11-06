@@ -195,6 +195,13 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
 
   const freshPage = useCallback(async () => {
     clearAppState();
+    if (!app.remote) {
+      try {
+        await fetch(`/api/sandbox/${app.id}/reset`, { method: "POST", credentials: "include" });
+      } catch {
+        /* the app falls back to an empty session */
+      }
+    }
     const f = frame.current!;
     await new Promise<void>((resolve) => {
       f.onload = () => {
@@ -203,7 +210,7 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
       };
       f.src = "about:blank";
     });
-  }, [clearAppState]);
+  }, [clearAppState, app.id, app.remote]);
 
   const commitToGitHub = useCallback(
     async (snapshot: Files, summary: string) => {
@@ -427,6 +434,7 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
       result = await runProject(files, {
         frame: f,
         base: app.base,
+        apiBase: app.api,
         slowMo: speed,
         timeout: 5000,
         onLog: push,

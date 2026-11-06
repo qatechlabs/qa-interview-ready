@@ -50,62 +50,95 @@
   .complete-header{color:#127a6f}
   .actions{display:flex;gap:10px;justify-content:flex-end;margin-top:14px}
   .back{background:none;border:none;color:#127a6f;padding:0;font-weight:600}
+  .search{flex:1;max-width:320px}.search input{padding:7px 10px}
+  .flash{background:#e8f4f2;color:#127a6f;text-align:center;padding:6px;font-size:13px;border-bottom:1px solid #dfe3e8}
+  .controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.controls select{width:auto}
+  .meta{display:flex;justify-content:space-between;font-size:12px;color:#56656f}.cat{background:#e8f4f2;color:#127a6f;border-radius:999px;padding:1px 8px}
+  .dim{color:#56656f;font-weight:400;font-size:13px}
+  .qty{font-size:13px;display:inline-block;margin-top:6px}.qty select{width:auto;padding:3px 6px}
+  .line-total{font-weight:700;min-width:70px;text-align:right}
+  .coupon-box{margin-top:12px}.coupon{display:flex;gap:8px;margin-bottom:8px}.coupon button{white-space:nowrap}
+  .msg-ok{color:#127a6f;font-size:13px;margin:4px 0}.msg-err{color:#c0392b;font-size:13px;margin:4px 0}
+  .table{width:100%;border-collapse:collapse;font-size:14px}.table th,.table td{text-align:left;padding:8px;border-bottom:1px solid #eef0f2}
+  .badge{border-radius:999px;padding:2px 8px;font-size:12px;font-weight:700;background:#e8f4f2;color:#127a6f}.badge.cancelled{background:#fde8e8;color:#9b1c1c}
+  .empty{color:#56656f}
+  @media (max-width:640px){.search{display:none}}
 </style>
 </head>
 <body>
 <div id="app"></div>
 <script>
+/* SwagShop practice app. Talks to the SwagShop REST API (/api/sandbox/swagshop); nothing is kept
+   in the browser except a cached copy of the last responses, which the labs read via window.__lab. */
 (function () {
   "use strict";
-  var NS = "lab:swagshop:";
-  var PASSWORD = "secret_sauce";
-  var USERS = ["standard_user", "locked_out_user", "problem_user", "performance_glitch_user"];
-  var PRODUCTS = [
-    { id: 0, name: "Trail Runner Backpack", price: 29.99, icon: "🎒", desc: "Water-resistant 20L pack with a padded laptop sleeve." },
-    { id: 1, name: "Night Ride Bike Light", price: 9.99, icon: "🔦", desc: "USB rechargeable, three modes, clips onto any handlebar." },
-    { id: 2, name: "Classic Cotton Tee", price: 15.99, icon: "👕", desc: "Soft ring-spun cotton with a small embroidered logo." },
-    { id: 3, name: "Fleece Zip Jacket", price: 49.99, icon: "🧥", desc: "Mid-weight fleece for cold mornings and late commits." },
-    { id: 4, name: "Baby Romper", price: 7.99, icon: "🍼", desc: "Snap buttons, breathable fabric, tested by tiny QA engineers." },
-    { id: 5, name: "Red Test Hoodie", price: 15.99, icon: "🟥", desc: "A bold hoodie for engineers who like their builds green." }
-  ];
-
-  function get(k, d) { try { var v = sessionStorage.getItem(NS + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } }
-  function set(k, v) { try { sessionStorage.setItem(NS + k, JSON.stringify(v)); } catch (e) {} }
-  function del(k) { try { sessionStorage.removeItem(NS + k); } catch (e) {} }
-  function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
-  function money(n) { return "$" + n.toFixed(2); }
-  function slug(p) { return p.name.toLowerCase().replace(/[^a-z0-9]+/g, "-"); }
-
-  var ui = { menu: false, loginError: "", checkoutError: "", loggingIn: false };
+  var API = (window.LAB_API_BASE || "") + "/api/sandbox/swagshop";
   var app = document.getElementById("app");
-
-  function user() { return get("user", null); }
-  function cart() { return get("cart", []); }
+  var S = { ready: false, user: null, cart: { items: [], count: 0, subtotal: 0, coupon: null, discount: 0, tax: 0, total: 0 }, products: [], categories: [], product: null, orders: [], order: null, lastOrder: null, info: null, query: { q: "", category: "", sort: "az" }, listKey: "" };
+  var ui = { menu: false, loginError: "", checkoutError: "", loggingIn: false, couponMsg: null, loading: false, flash: "" };
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+  function money(n) { return "$" + Number(n || 0).toFixed(2); }
+  function slug(p) { return p.name.toLowerCase().replace(/[^a-z0-9]+/g, "-"); }
   function route() { return (location.hash.replace(/^#/, "") || "/").split("?")[0]; }
   function go(path) { location.hash = path; }
-
+  function api(method, path, body) {
+    return fetch(API + path, { method: method, credentials: "include", headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) { return r.text().then(function (t) { var d = {}; try { d = t ? JSON.parse(t) : {}; } catch (e) {} return { ok: r.ok, status: r.status, data: d }; }); });
+  }
+  function cartIds() { return S.cart.items.map(function (i) { return i.productId; }); }
   window.__lab = {
-    get user() { return user(); },
-    get cart() { return cart(); },
-    get lastOrder() { return get("lastOrder", null); },
-    reset: function () { Object.keys(sessionStorage).forEach(function (k) { if (k.indexOf(NS) === 0) sessionStorage.removeItem(k); }); }
+    get user() { return S.user ? S.user.username : null; },
+    get cart() { return cartIds(); },
+    get cartItems() { return S.cart.items.map(function (i) { return { id: i.productId, qty: i.qty }; }); },
+    get cartTotals() { return { subtotal: S.cart.subtotal, discount: S.cart.discount, tax: S.cart.tax, total: S.cart.total, coupon: S.cart.coupon }; },
+    get lastOrder() { var o = S.lastOrder; return o ? { id: o.id, items: o.items.map(function (i) { return i.name; }), lines: o.items, subtotal: o.subtotal, discount: o.discount, coupon: o.coupon, tax: o.tax, total: o.total, status: o.status, payment: o.payment, info: o.info } : null; },
+    get orders() { return S.orders; },
+    get ready() { return S.ready; },
+    reset: function () { return api("POST", "/reset").then(function () { S.user = null; S.cart = { items: [], count: 0, subtotal: 0, coupon: null, discount: 0, tax: 0, total: 0 }; S.orders = []; S.lastOrder = null; S.info = null; location.hash = "#/"; render(); }); },
+    refresh: function () { return loadSession().then(render); }
   };
+  function loadSession() {
+    return api("GET", "/me").then(function (r) {
+      S.user = r.ok ? r.data.user : null;
+      if (!S.user) { S.cart = { items: [], count: 0, subtotal: 0, coupon: null, discount: 0, tax: 0, total: 0 }; return; }
+      return api("GET", "/cart").then(function (c) { if (c.ok) S.cart = c.data; });
+    }).then(function () { S.ready = true; });
+  }
+  function loadProducts() {
+    var q = S.query, key = JSON.stringify(q);
+    if (S.listKey === key) return Promise.resolve();
+    return api("GET", "/products?sort=" + encodeURIComponent(q.sort) + "&q=" + encodeURIComponent(q.q) + "&category=" + encodeURIComponent(q.category) + "&limit=50").then(function (r) {
+      if (r.ok) { S.products = r.data.items; S.categories = r.data.categories || []; S.listKey = key; }
+    });
+  }
+  function sortLocal(list, mode) {
+    var l = list.slice();
+    if (mode === "az") l.sort(function (a, b) { return a.name.localeCompare(b.name); });
+    if (mode === "za") l.sort(function (a, b) { return b.name.localeCompare(a.name); });
+    if (mode === "lohi") l.sort(function (a, b) { return a.price - b.price || a.name.localeCompare(b.name); });
+    if (mode === "hilo") l.sort(function (a, b) { return b.price - a.price || a.name.localeCompare(b.name); });
+    return l;
+  }
+  function refreshCart() { return api("GET", "/cart").then(function (c) { if (c.ok) S.cart = c.data; }); }
+  function setFlash(t) { ui.flash = t; setTimeout(function () { ui.flash = ""; render(); }, 2000); }
 
   function header() {
-    var c = cart().length;
+    var c = S.cart.count;
     return '<header>' +
       '<button class="secondary" id="react-burger-menu-btn" aria-label="Open Menu" data-test="open-menu">☰</button>' +
-      '<div class="brand">SwagShop</div>' +
+      '<div class="brand" data-go="/inventory" role="link">SwagShop</div>' +
+      '<form id="search-form" class="search" role="search"><input id="search" name="q" type="search" placeholder="Search products" aria-label="Search products" data-test="search" value="' + esc(S.query.q) + '"></form>' +
       '<button class="cart-link" aria-label="Shopping cart" data-test="shopping-cart-link">🛒' +
       (c ? '<span class="shopping_cart_badge" data-test="shopping-cart-badge">' + c + '</span>' : '') + '</button>' +
       (ui.menu ? '<nav class="menu" aria-label="Main menu">' +
         '<a role="link" id="inventory_sidebar_link" data-test="inventory-sidebar-link" data-go="/inventory">All Items</a>' +
+        '<a role="link" id="orders_sidebar_link" data-test="orders-sidebar-link" data-go="/orders">My Orders</a>' +
+        '<a role="link" id="account_sidebar_link" data-test="account-sidebar-link" data-go="/account">My Account</a>' +
         '<a role="link" id="reset_sidebar_link" data-test="reset-sidebar-link" data-action="reset">Reset App State</a>' +
         '<a role="link" id="logout_sidebar_link" data-test="logout-sidebar-link" data-action="logout">Logout</a>' +
         '</nav>' : '') +
-      '</header>';
+      '</header>' + (ui.flash ? '<div class="flash" role="status" data-test="flash">' + esc(ui.flash) + '</div>' : '');
   }
-
   function loginView() {
     return '<div class="login">' +
       '<h1>SwagShop</h1>' +
@@ -115,115 +148,137 @@
       (ui.loginError ? '<div class="error" data-test="error" role="alert"><span>' + esc(ui.loginError) + '</span><button type="button" class="error-button" data-test="error-button" aria-label="Dismiss error">✕</button></div>' : '') +
       '<button type="submit" id="login-button" data-test="login-button" style="width:100%"' + (ui.loggingIn ? ' disabled' : '') + '>' + (ui.loggingIn ? 'Logging in…' : 'Login') + '</button>' +
       '</form></div>' +
-      '<div class="hint"><b>Accepted usernames:</b> ' + USERS.join(", ") + '<br><b>Password for all users:</b> ' + PASSWORD + '</div>';
+      '<div class="hint"><b>Accepted usernames:</b> standard_user, locked_out_user, problem_user, performance_glitch_user<br><b>Password for all users:</b> secret_sauce<br><span class="dim">REST API: <code>' + esc(API) + '</code></span></div>';
   }
-
-  function sortList(list, mode) {
-    var l = list.slice();
-    if (user() === "problem_user") return l; // sorting is intentionally broken for this user
-    if (mode === "az") l.sort(function (a, b) { return a.name.localeCompare(b.name); });
-    if (mode === "za") l.sort(function (a, b) { return b.name.localeCompare(a.name); });
-    if (mode === "lohi") l.sort(function (a, b) { return a.price - b.price || a.name.localeCompare(b.name); });
-    if (mode === "hilo") l.sort(function (a, b) { return b.price - a.price || a.name.localeCompare(b.name); });
-    return l;
-  }
-
   function addRemoveButton(p) {
-    var inCart = cart().indexOf(p.id) >= 0;
-    return inCart
+    var line = S.cart.items.filter(function (i) { return i.productId === p.id; })[0];
+    if (p.stock === 0) return '<button disabled data-test="out-of-stock-' + slug(p) + '">Out of stock</button>';
+    return line
       ? '<button class="danger" data-test="remove-' + slug(p) + '" data-remove="' + p.id + '">Remove</button>'
       : '<button data-test="add-to-cart-' + slug(p) + '" data-add="' + p.id + '">Add to cart</button>';
   }
-
   function inventoryView() {
-    var mode = get("sort", "az");
-    var items = sortList(PRODUCTS, mode).map(function (p) {
-      return '<div class="inventory_item" data-test="inventory-item">' +
-        '<div class="thumb" aria-hidden="true">' + (user() === "problem_user" ? "🐶" : p.icon) + '</div>' +
+    var problem = S.user && S.user.problem;
+    var items = S.products.map(function (p) {
+      return '<div class="inventory_item" data-test="inventory-item" data-sku="' + esc(p.sku) + '">' +
+        '<div class="thumb" aria-hidden="true">' + (problem ? "🐶" : p.icon) + '</div>' +
         '<button class="inventory_item_name" data-test="inventory-item-name" data-open="' + p.id + '">' + esc(p.name) + '</button>' +
         '<div class="inventory_item_desc" data-test="inventory-item-desc">' + esc(p.desc) + '</div>' +
+        '<div class="meta"><span class="cat" data-test="inventory-item-category">' + esc(p.category) + '</span><span class="rating" data-test="inventory-item-rating">★ ' + p.rating.toFixed(1) + '</span></div>' +
         '<div class="row"><span class="inventory_item_price" data-test="inventory-item-price">' + money(p.price) + '</span>' + addRemoveButton(p) + '</div>' +
         '</div>';
     }).join("");
-    return header() + '<main><div class="bar"><h2 class="title" data-test="title">Products</h2>' +
+    var cats = ['<option value="">All categories</option>'].concat(S.categories.map(function (c) { return '<option value="' + esc(c) + '"' + (c === S.query.category ? " selected" : "") + '>' + esc(c) + '</option>'; })).join("");
+    return header() + '<main><div class="bar"><h2 class="title" data-test="title">Products</h2><span class="dim" data-test="product-count">' + S.products.length + ' item' + (S.products.length === 1 ? '' : 's') + (S.query.q ? ' for “' + esc(S.query.q) + '”' : '') + '</span>' +
+      '<div class="controls"><label>Category <select id="category" data-test="category-filter" aria-label="Filter by category">' + cats + '</select></label>' +
       '<label>Sort <select class="product_sort_container" data-test="product-sort-container" aria-label="Sort products">' +
       [["az", "Name (A to Z)"], ["za", "Name (Z to A)"], ["lohi", "Price (low to high)"], ["hilo", "Price (high to low)"]].map(function (o) {
-        return '<option value="' + o[0] + '"' + (o[0] === mode ? " selected" : "") + '>' + o[1] + '</option>';
-      }).join("") + '</select></label></div><div class="grid inventory_list" data-test="inventory-list">' + items + '</div></main>';
+        return '<option value="' + o[0] + '"' + (o[0] === S.query.sort ? " selected" : "") + '>' + o[1] + '</option>';
+      }).join("") + '</select></label></div></div><div class="grid inventory_list" data-test="inventory-list">' + (items || '<p class="empty" data-test="no-products">No products match your search.</p>') + '</div></main>';
   }
-
-  function itemView(id) {
-    var p = PRODUCTS.filter(function (x) { return String(x.id) === id; })[0];
-    if (!p) return header() + '<main><p>Item not found.</p></main>';
+  function itemView() {
+    var p = S.product;
+    if (!p) return header() + '<main><p data-test="not-found">Item not found.</p></main>';
+    var line = S.cart.items.filter(function (i) { return i.productId === p.id; })[0];
     return header() + '<main><button class="back" data-test="back-to-products" data-go="/inventory">← Back to products</button>' +
-      '<div class="panel" style="margin-top:12px;display:flex;gap:16px;align-items:center">' +
-      '<div class="thumb" style="width:140px;height:140px;font-size:64px" aria-hidden="true">' + p.icon + '</div>' +
-      '<div style="flex:1"><h2 class="inventory_details_name" data-test="inventory-item-name">' + esc(p.name) + '</h2>' +
+      '<div class="panel" style="margin-top:12px;display:flex;gap:16px;align-items:center;flex-wrap:wrap">' +
+      '<div class="thumb" style="width:140px;height:140px;font-size:64px" aria-hidden="true">' + (S.user && S.user.problem ? "🐶" : p.icon) + '</div>' +
+      '<div style="flex:1;min-width:220px"><h2 class="inventory_details_name" data-test="inventory-item-name">' + esc(p.name) + '</h2>' +
       '<p data-test="inventory-item-desc">' + esc(p.desc) + '</p>' +
-      '<p class="inventory_details_price" data-test="inventory-item-price"><b>' + money(p.price) + '</b></p>' + addRemoveButton(p) + '</div></div></main>';
+      '<p class="dim">SKU <span data-test="inventory-item-sku">' + esc(p.sku) + '</span> · ' + esc(p.category) + ' · ★ ' + p.rating.toFixed(1) + ' · <span data-test="inventory-item-stock">' + (p.stock > 0 ? p.stock + ' in stock' : 'Out of stock') + '</span></p>' +
+      '<p class="inventory_details_price" data-test="inventory-item-price"><b>' + money(p.price) + '</b></p>' +
+      (line ? '<p class="dim">In cart: <span data-test="in-cart-qty">' + line.qty + '</span></p>' : '') + addRemoveButton(p) + '</div></div></main>';
   }
-
+  function qtySelect(i) {
+    return '<label class="qty">Qty <select data-qty="' + i.productId + '" aria-label="Quantity for ' + esc(i.name) + '" data-test="item-quantity-select">' + [1, 2, 3, 4, 5].map(function (n) { return '<option' + (n === i.qty ? " selected" : "") + '>' + n + '</option>'; }).join("") + '</select></label>';
+  }
   function cartView() {
-    var rows = cart().map(function (id) {
-      var p = PRODUCTS[id];
-      return '<div class="cart_item" data-test="inventory-item"><span class="cart_quantity" data-test="item-quantity">1</span>' +
-        '<div style="flex:1"><div class="inventory_item_name" data-test="inventory-item-name">' + esc(p.name) + '</div>' +
-        '<div class="inventory_item_price" data-test="inventory-item-price">' + money(p.price) + '</div></div>' +
-        '<button class="danger" data-test="remove-' + slug(p) + '" data-remove="' + p.id + '">Remove</button></div>';
+    var rows = S.cart.items.map(function (i) {
+      return '<div class="cart_item" data-test="inventory-item"><span class="cart_quantity" data-test="item-quantity">' + i.qty + '</span>' +
+        '<div style="flex:1"><div class="inventory_item_name" data-test="inventory-item-name">' + esc(i.name) + '</div>' +
+        '<div class="inventory_item_price" data-test="inventory-item-price">' + money(i.price) + '</div>' + qtySelect(i) + '</div>' +
+        '<div class="line-total" data-test="line-total">' + money(i.lineTotal) + '</div>' +
+        '<button class="danger" data-test="remove-' + i.name.toLowerCase().replace(/[^a-z0-9]+/g, "-") + '" data-remove="' + i.productId + '">Remove</button></div>';
     }).join("");
+    var c = S.cart;
     return header() + '<main><div class="bar"><h2 class="title" data-test="title">Your Cart</h2></div>' +
       '<div class="panel cart_list" data-test="cart-list">' + (rows || '<p class="empty" data-test="cart-empty">Your cart is empty.</p>') + '</div>' +
+      (rows ? '<div class="panel coupon-box"><form id="coupon-form" class="coupon"><input id="coupon" data-test="coupon" placeholder="Coupon code (try SAVE10)" aria-label="Coupon code" value="' + esc(c.coupon || "") + '"><button type="submit" class="secondary" data-test="apply-coupon">Apply</button>' + (c.coupon ? '<button type="button" class="secondary" data-action="remove-coupon" data-test="remove-coupon">Remove</button>' : '') + '</form>' +
+        (ui.couponMsg ? '<p class="' + (ui.couponMsg.ok ? "msg-ok" : "msg-err") + '" role="status" data-test="coupon-message">' + esc(ui.couponMsg.text) + '</p>' : '') +
+        '<div class="summary_info"><div data-test="subtotal-label">Item total: ' + money(c.subtotal) + '</div>' + (c.discount ? '<div data-test="discount-label">Coupon ' + esc(c.coupon) + ': -' + money(c.discount) + '</div>' : '') + '<div data-test="tax-label">Tax: ' + money(c.tax) + '</div><div class="summary_total_label" data-test="total-label">Total: ' + money(c.total) + '</div></div></div>' : '') +
       '<div class="actions"><button class="secondary" id="continue-shopping" data-test="continue-shopping" data-go="/inventory">Continue Shopping</button>' +
-      '<button id="checkout" data-test="checkout" data-go="/checkout-step-one">Checkout</button></div></main>';
+      '<button id="checkout" data-test="checkout" data-go="/checkout-step-one"' + (rows ? '' : ' disabled') + '>Checkout</button></div></main>';
   }
-
   function stepOneView() {
-    var f = get("info", { first: "", last: "", zip: "" });
+    var f = S.info || { firstName: "", lastName: "", postalCode: "" };
     return header() + '<main><div class="bar"><h2 class="title" data-test="title">Checkout: Your Information</h2></div>' +
       '<form class="panel form" id="info-form" novalidate>' +
-      '<input id="first-name" data-test="firstName" placeholder="First Name" aria-label="First Name" value="' + esc(f.first) + '">' +
-      '<input id="last-name" data-test="lastName" placeholder="Last Name" aria-label="Last Name" value="' + esc(f.last) + '">' +
-      '<input id="postal-code" data-test="postalCode" placeholder="Zip/Postal Code" aria-label="Zip/Postal Code" value="' + esc(f.zip) + '">' +
+      '<input id="first-name" data-test="firstName" placeholder="First Name" aria-label="First Name" value="' + esc(f.firstName) + '">' +
+      '<input id="last-name" data-test="lastName" placeholder="Last Name" aria-label="Last Name" value="' + esc(f.lastName) + '">' +
+      '<input id="postal-code" data-test="postalCode" placeholder="Zip/Postal Code" aria-label="Zip/Postal Code" value="' + esc(f.postalCode) + '">' +
+      '<label>Payment <select id="payment" data-test="payment" aria-label="Payment method"><option value="card">Card</option><option value="upi">UPI</option><option value="cod">Cash on delivery</option></select></label>' +
       (ui.checkoutError ? '<div class="error" data-test="error" role="alert"><span>' + esc(ui.checkoutError) + '</span></div>' : '') +
       '<div class="actions"><button type="button" class="secondary" id="cancel" data-test="cancel" data-go="/cart">Cancel</button>' +
       '<button type="submit" id="continue" data-test="continue">Continue</button></div></form></main>';
   }
-
-  function totals() {
-    var sub = cart().reduce(function (s, id) { return s + PRODUCTS[id].price; }, 0);
-    var tax = Math.round(sub * 0.08 * 100) / 100;
-    return { sub: sub, tax: tax, total: Math.round((sub + tax) * 100) / 100 };
-  }
-
   function stepTwoView() {
-    var t = totals();
-    var rows = cart().map(function (id) {
-      var p = PRODUCTS[id];
-      return '<div class="cart_item" data-test="inventory-item"><span class="cart_quantity" data-test="item-quantity">1</span><div style="flex:1">' +
-        '<div class="inventory_item_name" data-test="inventory-item-name">' + esc(p.name) + '</div></div>' +
-        '<div class="inventory_item_price" data-test="inventory-item-price">' + money(p.price) + '</div></div>';
+    var c = S.cart;
+    var rows = c.items.map(function (i) {
+      return '<div class="cart_item" data-test="inventory-item"><span class="cart_quantity" data-test="item-quantity">' + i.qty + '</span><div style="flex:1">' +
+        '<div class="inventory_item_name" data-test="inventory-item-name">' + esc(i.name) + '</div></div>' +
+        '<div class="inventory_item_price" data-test="inventory-item-price">' + money(i.lineTotal) + '</div></div>';
     }).join("");
+    var info = S.info || {};
     return header() + '<main><div class="bar"><h2 class="title" data-test="title">Checkout: Overview</h2></div>' +
       '<div class="panel">' + rows + '<div class="summary_info" style="margin-top:12px">' +
-      '<div class="summary_subtotal_label" data-test="subtotal-label">Item total: ' + money(t.sub) + '</div>' +
-      '<div class="summary_tax_label" data-test="tax-label">Tax: ' + money(t.tax) + '</div>' +
-      '<div class="summary_total_label" data-test="total-label">Total: ' + money(t.total) + '</div></div></div>' +
+      '<div data-test="ship-to">Ship to: ' + esc(info.firstName + " " + info.lastName) + ', ' + esc(info.postalCode) + ' · Payment: <span data-test="payment-method">' + esc(ui.payment || "card") + '</span></div>' +
+      '<div class="summary_subtotal_label" data-test="subtotal-label">Item total: ' + money(c.subtotal) + '</div>' +
+      (c.discount ? '<div class="summary_discount_label" data-test="discount-label">Coupon ' + esc(c.coupon) + ': -' + money(c.discount) + '</div>' : '') +
+      '<div class="summary_tax_label" data-test="tax-label">Tax: ' + money(c.tax) + '</div>' +
+      '<div class="summary_total_label" data-test="total-label">Total: ' + money(c.total) + '</div></div></div>' +
       '<div class="actions"><button class="secondary" id="cancel" data-test="cancel" data-go="/inventory">Cancel</button>' +
-      '<button id="finish" data-test="finish" data-action="finish">Finish</button></div></main>';
+      '<button id="finish" data-test="finish" data-action="finish"' + (ui.loading ? " disabled" : "") + '>' + (ui.loading ? "Placing order…" : "Finish") + '</button></div></main>';
   }
-
   function completeView() {
+    var o = S.lastOrder;
     return header() + '<main><div class="bar"><h2 class="title" data-test="title">Checkout: Complete!</h2></div>' +
       '<div class="panel complete"><div style="font-size:48px">✅</div>' +
       '<h2 class="complete-header" data-test="complete-header">Thank you for your order!</h2>' +
       '<p class="complete-text" data-test="complete-text">Your order has been dispatched and will arrive just as fast as the pony can get there!</p>' +
+      (o ? '<p>Order <b data-test="order-id">' + esc(o.id) + '</b> · Total <b data-test="order-total">' + money(o.total) + '</b> · <a href="#/orders/' + esc(o.id) + '" data-test="view-order">View order</a></p>' : '') +
       '<button id="back-to-products" data-test="back-to-products" data-go="/inventory">Back Home</button></div></main>';
   }
+  function ordersView() {
+    var rows = S.orders.map(function (o) {
+      return '<tr data-test="order-row"><td><a href="#/orders/' + esc(o.id) + '" data-test="order-link">' + esc(o.id) + '</a></td><td>' + esc(new Date(o.placedAt).toLocaleString()) + '</td><td>' + o.items.reduce(function (s, i) { return s + i.qty; }, 0) + '</td><td data-test="order-total">' + money(o.total) + '</td><td><span class="badge ' + o.status + '" data-test="order-status">' + esc(o.status) + '</span></td></tr>';
+    }).join("");
+    return header() + '<main><div class="bar"><h2 class="title" data-test="title">My Orders <span class="dim" data-test="order-count">(' + S.orders.length + ')</span></h2></div>' +
+      '<div class="panel">' + (rows ? '<table class="table" aria-label="Orders"><thead><tr><th>Order</th><th>Placed</th><th>Items</th><th>Total</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody></table>' : '<p class="empty" data-test="no-orders">You have not placed any orders yet.</p>') + '</div></main>';
+  }
+  function orderView() {
+    var o = S.order;
+    if (!o) return header() + '<main><p data-test="not-found">Order not found.</p></main>';
+    var rows = o.items.map(function (i) { return '<div class="cart_item" data-test="inventory-item"><span class="cart_quantity" data-test="item-quantity">' + i.qty + '</span><div style="flex:1"><div class="inventory_item_name" data-test="inventory-item-name">' + esc(i.name) + '</div></div><div class="inventory_item_price" data-test="inventory-item-price">' + money(i.price * i.qty) + '</div></div>'; }).join("");
+    return header() + '<main><button class="back" data-test="back-to-orders" data-go="/orders">← Back to orders</button><div class="bar" style="margin-top:10px"><h2 class="title" data-test="title">Order ' + esc(o.id) + ' <span class="badge ' + o.status + '" data-test="order-status">' + esc(o.status) + '</span></h2></div>' +
+      '<div class="panel">' + rows + '<div class="summary_info" style="margin-top:12px"><div>Placed: ' + esc(new Date(o.placedAt).toLocaleString()) + '</div><div>Ship to: ' + esc(o.info.firstName + " " + o.info.lastName + ", " + o.info.postalCode) + '</div><div>Payment: ' + esc(o.payment) + '</div>' +
+      '<div data-test="subtotal-label">Item total: ' + money(o.subtotal) + '</div>' + (o.discount ? '<div data-test="discount-label">Coupon ' + esc(o.coupon) + ': -' + money(o.discount) + '</div>' : '') + '<div data-test="tax-label">Tax: ' + money(o.tax) + '</div><div class="summary_total_label" data-test="total-label">Total: ' + money(o.total) + '</div></div>' +
+      (o.status === "placed" ? '<div class="actions"><button class="danger" data-action="cancel-order" data-test="cancel-order">Cancel order</button></div>' : '') + '</div></main>';
+  }
+  function accountView() {
+    var u = S.user;
+    return header() + '<main><div class="bar"><h2 class="title" data-test="title">My Account</h2></div>' +
+      '<div class="panel"><p>Signed in as <b data-test="account-username">' + esc(u.username) + '</b> (' + esc(u.displayName) + ')</p><p>Email: <span data-test="account-email">' + esc(u.email) + '</span></p><p>Orders placed: <span data-test="account-orders">' + S.orders.length + '</span></p>' +
+      '<p class="dim">API token for this user is returned by <code>POST ' + esc(API) + '/auth/login</code>.</p>' +
+      '<div class="actions" style="justify-content:flex-start"><button class="secondary" data-go="/orders">My Orders</button><button class="danger" data-action="logout" data-test="account-logout">Logout</button></div></div></main>';
+  }
 
+  var EMPTY_CART = { items: [], count: 0, subtotal: 0, coupon: null, discount: 0, tax: 0, total: 0 };
+  /* Elements carry data-test (Saucedemo/OrangeHRM style); data-testid is mirrored so Playwright's default getByTestId works too. */
+  function mirrorTestIds() { var els = app.querySelectorAll("[data-test]"); for (var i = 0; i < els.length; i++) if (!els[i].hasAttribute("data-testid")) els[i].setAttribute("data-testid", els[i].getAttribute("data-test")); }
   function render() {
     var r = route();
-    var u = user();
-    if (r !== "/" && !u) {
+    if (!S.ready) { app.innerHTML = '<div class="login"><h1>SwagShop</h1><p class="dim" style="text-align:center">Loading…</p></div>'; return; }
+    if (r !== "/" && !S.user) {
       ui.loginError = "Error: You can only access '" + r + "' when you are logged in.";
       location.replace("#/");
       return;
@@ -231,16 +286,35 @@
     var html;
     if (r === "/") html = loginView();
     else if (r === "/inventory") html = inventoryView();
-    else if (r.indexOf("/item/") === 0) html = itemView(r.slice(6));
+    else if (r.indexOf("/item/") === 0) html = itemView();
     else if (r === "/cart") html = cartView();
     else if (r === "/checkout-step-one") html = stepOneView();
     else if (r === "/checkout-step-two") html = stepTwoView();
     else if (r === "/checkout-complete") html = completeView();
+    else if (r === "/orders") html = ordersView();
+    else if (r.indexOf("/orders/") === 0) html = orderView();
+    else if (r === "/account") html = accountView();
     else html = header() + '<main><h2>Page not found</h2></main>';
     app.innerHTML = html;
-    var titles = { "/": "SwagShop", "/inventory": "SwagShop | Products", "/cart": "SwagShop | Cart" };
-    document.title = titles[r] || "SwagShop";
+    mirrorTestIds();
+    var titles = { "/": "SwagShop", "/inventory": "SwagShop | Products", "/cart": "SwagShop | Cart", "/orders": "SwagShop | My Orders", "/account": "SwagShop | My Account" };
+    document.title = titles[r] || (S.product && r.indexOf("/item/") === 0 ? "SwagShop | " + S.product.name : "SwagShop");
   }
+  // Loads what the current route needs, then renders.
+  function load() {
+    var r = route();
+    var p;
+    if (r === "/inventory") p = loadProducts();
+    else if (r.indexOf("/item/") === 0) p = api("GET", "/products/" + encodeURIComponent(r.slice(6))).then(function (x) { S.product = x.ok ? x.data : null; });
+    else if (r === "/orders" || r === "/account") p = api("GET", "/orders").then(function (x) { if (x.ok) S.orders = x.data.items; });
+    else if (r.indexOf("/orders/") === 0) p = api("GET", "/orders/" + encodeURIComponent(r.slice(8))).then(function (x) { S.order = x.ok ? x.data.order : null; });
+    else if (r === "/checkout-step-two") p = api("GET", "/checkout/summary").then(function (x) { if (x.ok) { S.info = x.data.info; delete x.data.info; S.cart = x.data; } });
+    else if (r === "/cart" || r === "/checkout-step-one") p = refreshCart().then(function () { if (!S.info) return api("GET", "/checkout/summary").then(function (x) { if (x.ok) S.info = x.data.info; }); });
+    else p = Promise.resolve();
+    if (S.user && (r === "/inventory" || r.indexOf("/item/") === 0)) p = p.then(refreshCart);
+    return p.then(render, render);
+  }
+  function onRoute() { if (!S.user && route() !== "/") return render(); load(); }
 
   app.addEventListener("click", function (e) {
     var t = e.target.closest("[data-go],[data-add],[data-remove],[data-open],[data-action],#react-burger-menu-btn,.cart-link,.error-button");
@@ -249,56 +323,75 @@
     ui.menu = false;
     if (t.classList.contains("cart-link")) return go("/cart");
     if (t.classList.contains("error-button")) { ui.loginError = ""; return render(); }
-    if (t.dataset.go) { ui.checkoutError = ""; if (route() === t.dataset.go) return render(); return go(t.dataset.go); }
+    if (t.dataset.go) { ui.checkoutError = ""; if (route() === t.dataset.go) return load(); return go(t.dataset.go); }
     if (t.dataset.open) return go("/item/" + t.dataset.open);
-    if (t.dataset.add) { var c = cart(); var id = +t.dataset.add; if (c.indexOf(id) < 0) c.push(id); set("cart", c); return render(); }
-    if (t.dataset.remove) { set("cart", cart().filter(function (x) { return x !== +t.dataset.remove; })); return render(); }
-    if (t.dataset.action === "logout") { del("user"); del("cart"); del("info"); ui.loginError = ""; return go("/"); }
-    if (t.dataset.action === "reset") { set("cart", []); return render(); }
+    if (t.dataset.add) { return api("POST", "/cart/items", { productId: +t.dataset.add, qty: 1 }).then(function (r) { if (r.ok) S.cart = r.data; else setFlash(r.data.error ? r.data.error.message : "Could not add"); render(); }); }
+    if (t.dataset.remove) { return api("DELETE", "/cart/items/" + t.dataset.remove).then(function (r) { if (r.ok) S.cart = r.data; render(); }); }
+    if (t.dataset.action === "logout") { return api("POST", "/auth/logout").then(function () { S.user = null; S.cart = EMPTY_CART; S.info = null; ui.loginError = ""; go("/"); }); }
+    if (t.dataset.action === "reset") { return api("DELETE", "/cart").then(function (r) { if (r.ok) S.cart = r.data; S.listKey = ""; load(); }); }
+    if (t.dataset.action === "remove-coupon") { return api("DELETE", "/cart/coupon").then(function (r) { if (r.ok) S.cart = r.data; ui.couponMsg = null; render(); }); }
+    if (t.dataset.action === "cancel-order") { return api("POST", "/orders/" + encodeURIComponent(S.order.id) + "/cancel").then(function (r) { if (r.ok) { S.order = r.data.order; setFlash("Order cancelled"); } render(); }); }
     if (t.dataset.action === "finish") {
-      var t2 = totals();
-      set("lastOrder", { items: cart().map(function (id) { return PRODUCTS[id].name; }), total: t2.total, info: get("info", null), at: Date.now() });
-      set("cart", []); del("info");
-      return go("/checkout-complete");
+      ui.loading = true; render();
+      return api("POST", "/orders", { payment: ui.payment || "card" }).then(function (r) {
+        ui.loading = false;
+        if (!r.ok) { ui.checkoutError = r.data.error ? r.data.error.message : "Could not place the order"; return go("/checkout-step-one"); }
+        S.lastOrder = r.data.order; S.cart = EMPTY_CART; S.info = null;
+        return go("/checkout-complete");
+      });
     }
   });
-
   app.addEventListener("change", function (e) {
-    if (e.target.matches("[data-test=product-sort-container]")) { set("sort", e.target.value); render(); }
+    var el = e.target;
+    if (el.matches("[data-test=product-sort-container]")) {
+      S.query.sort = el.value;
+      // sort what is on screen right away (the API returns the same order), then refresh from the server
+      if (!(S.user && S.user.problem)) S.products = sortLocal(S.products, el.value);
+      render();
+      return load();
+    }
+    if (el.id === "category") { S.query.category = el.value; return load(); }
+    if (el.dataset.qty != null) { return api("PATCH", "/cart/items/" + el.dataset.qty, { qty: +el.value }).then(function (r) { if (r.ok) S.cart = r.data; render(); }); }
+    if (el.id === "payment") ui.payment = el.value;
   });
-
   app.addEventListener("submit", function (e) {
     e.preventDefault();
-    if (e.target.id === "login-form") {
+    var id = e.target.id;
+    if (id === "login-form") {
       var name = document.getElementById("user-name").value.trim();
       var pw = document.getElementById("password").value;
       if (!name) ui.loginError = "Error: Username is required";
       else if (!pw) ui.loginError = "Error: Password is required";
-      else if (USERS.indexOf(name) < 0 || pw !== PASSWORD) ui.loginError = "Error: Username and password do not match any user in this service";
-      else if (name === "locked_out_user") ui.loginError = "Error: Sorry, this user has been locked out.";
       else {
-        ui.loginError = "";
-        var finish = function () { ui.loggingIn = false; set("user", name); go("/inventory"); };
-        if (name === "performance_glitch_user") { ui.loggingIn = true; render(); setTimeout(finish, 2500); return; }
-        return finish();
+        ui.loggingIn = true; ui.loginError = ""; render();
+        document.getElementById("user-name").value = name; document.getElementById("password").value = pw;
+        return api("POST", "/auth/login", { username: name, password: pw }).then(function (r) {
+          var finish = function () { ui.loggingIn = false; if (!r.ok) { ui.loginError = r.data.error ? r.data.error.message.replace(/^Error: /, "Error: ").replace(/^(?!Error: )/, "Error: ") : "Error: Login failed"; render(); var u = document.getElementById("user-name"); if (u) { u.value = name; document.getElementById("password").value = pw; } return; } S.user = r.data.user; S.cart = EMPTY_CART; go("/inventory"); };
+          if (r.ok && r.data.user.slow) return setTimeout(finish, 2500);
+          finish();
+        });
       }
       render();
-      var u = document.getElementById("user-name"); u.value = name;
-      document.getElementById("password").value = pw;
+      document.getElementById("user-name").value = name; document.getElementById("password").value = pw;
     }
-    if (e.target.id === "info-form") {
-      var f = { first: document.getElementById("first-name").value.trim(), last: document.getElementById("last-name").value.trim(), zip: document.getElementById("postal-code").value.trim() };
-      set("info", f);
-      if (!f.first) ui.checkoutError = "Error: First Name is required";
-      else if (!f.last) ui.checkoutError = "Error: Last Name is required";
-      else if (!f.zip) ui.checkoutError = "Error: Postal Code is required";
-      else { ui.checkoutError = ""; return go("/checkout-step-two"); }
-      render();
+    if (id === "search-form") { S.query.q = document.getElementById("search").value.trim(); if (route() === "/inventory") return load(); return go("/inventory"); }
+    if (id === "coupon-form") {
+      var code = document.getElementById("coupon").value.trim();
+      return api("POST", "/cart/coupon", { code: code }).then(function (r) { if (r.ok) { S.cart = r.data; ui.couponMsg = { ok: true, text: "Coupon " + code.toUpperCase() + " applied: " + r.data.couponLabel }; } else ui.couponMsg = { ok: false, text: r.data.error ? r.data.error.message : "Invalid coupon" }; render(); });
+    }
+    if (id === "info-form") {
+      var f = { firstName: document.getElementById("first-name").value.trim(), lastName: document.getElementById("last-name").value.trim(), postalCode: document.getElementById("postal-code").value.trim() };
+      ui.payment = document.getElementById("payment").value;
+      S.info = f;
+      return api("PUT", "/checkout/info", f).then(function (r) {
+        if (!r.ok) { ui.checkoutError = r.data.error ? r.data.error.message : "Please fill in all fields"; return render(); }
+        ui.checkoutError = ""; S.info = r.data.info; go("/checkout-step-two");
+      });
     }
   });
-
-  window.addEventListener("hashchange", render);
+  window.addEventListener("hashchange", onRoute);
   render();
+  loadSession().then(onRoute, onRoute);
 })();
 </script>
 </body>

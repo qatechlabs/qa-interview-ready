@@ -52,6 +52,9 @@
   .badge{display:inline-block;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:600;background:#fff4e5;color:#b54708}
   .actions{display:flex;gap:10px;justify-content:flex-end}
   @media (max-width:640px){aside{display:none}}
+  .alert[data-test=leave-error]{margin-top:8px}
+  .widget{background:#fafaff;border:1px solid #eeeef5;border-radius:10px;padding:10px}
+  code{background:#f6f6fb;padding:1px 4px;border-radius:4px;font-size:12px}
 </style>
 </head>
 <body>
@@ -59,239 +62,349 @@
 <script>
 (function () {
   "use strict";
-  var NS = "lab:peopledesk:";
-  var SEED = [
-    { id: "0001", first: "Priya", middle: "", last: "Sharma", job: "QA Engineer", status: "Full-Time Permanent", sub: "Quality Engineering" },
-    { id: "0002", first: "Rahul", middle: "K", last: "Verma", job: "SDET", status: "Full-Time Permanent", sub: "Quality Engineering" },
-    { id: "0003", first: "Ananya", middle: "", last: "Iyer", job: "Product Manager", status: "Full-Time Contract", sub: "Product" },
-    { id: "0004", first: "Vikram", middle: "", last: "Singh", job: "DevOps Engineer", status: "Full-Time Permanent", sub: "Platform" },
-    { id: "0005", first: "Sneha", middle: "R", last: "Patel", job: "HR Executive", status: "Part-Time", sub: "Human Resources" },
-    { id: "0006", first: "Arjun", middle: "", last: "Nair", job: "Test Lead", status: "Full-Time Permanent", sub: "Quality Engineering" }
-  ];
-  var LEAVE_TYPES = ["Casual Leave", "Sick Leave", "Earned Leave"];
-
-  function get(k, d) { try { var v = sessionStorage.getItem(NS + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } }
-  function set(k, v) { try { sessionStorage.setItem(NS + k, JSON.stringify(v)); } catch (e) {} }
-  function del(k) { try { sessionStorage.removeItem(NS + k); } catch (e) {} }
+  var API = (window.LAB_API_BASE || "") + "/api/sandbox/peopledesk";
+  var app = document.getElementById("app");
+  var S = { ready: false, auth: null, me: null, meta: { jobTitles: [], employmentStatus: [], departments: [], leaveTypes: [], leaveStatus: [] }, dashboard: null, employees: [], all: [], employeeTotal: 0, detail: null, leaves: [], balances: [], attendance: { items: [], open: null }, search: { name: "", id: "", job: "", status: "", department: "" }, leaveFilter: "" };
+  var ui = { loginError: "", loginRequired: {}, menu: false, toast: null, confirmId: null, addErrors: {}, editErrors: {}, leaveErrors: {}, leaveError: "", editing: false, flash: "" };
+  var toastTimer;
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
-
-  function employees() { return get("employees", SEED); }
-  function leaves() { return get("leaves", []); }
-  function loggedIn() { return get("auth", false); }
   function route() { return location.hash.replace(/^#/, "") || "/auth/login"; }
   function go(p) { location.hash = p; }
-
-  var ui = { loginError: "", loginRequired: {}, menu: false, toast: null, confirmId: null, search: { name: "", id: "" }, addErrors: {}, leaveErrors: {} };
-  var app = document.getElementById("app");
-  var toastTimer;
-
+  function api(method, path, body) {
+    return fetch(API + path, { method: method, credentials: "include", headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) { return r.text().then(function (t) { var d = {}; try { d = t ? JSON.parse(t) : {}; } catch (e) {} return { ok: r.ok, status: r.status, data: d }; }); });
+  }
+  function fullName(e) { return [e.first, e.middle, e.last].filter(Boolean).join(" "); }
+  function isAdmin() { return S.auth && S.auth.role === "admin"; }
   window.__lab = {
-    get employees() { return employees(); },
-    get leaves() { return leaves(); },
-    get loggedIn() { return loggedIn(); },
-    reset: function () { Object.keys(sessionStorage).forEach(function (k) { if (k.indexOf(NS) === 0) sessionStorage.removeItem(k); }); }
+    get employees() { return S.all; },
+    get results() { return S.employees; },
+    get leaves() { return S.leaves; },
+    get loggedIn() { return !!S.auth; },
+    get user() { return S.auth; },
+    get balances() { return S.balances; },
+    get attendance() { return S.attendance.items; },
+    get ready() { return S.ready; },
+    reset: function () { return api("POST", "/reset").then(function () { S.auth = null; S.employees = []; S.all = []; S.leaves = []; location.hash = "#/auth/login"; render(); }); }
   };
-
   function toast(title, text) {
     ui.toast = { title: title, text: text };
     clearTimeout(toastTimer);
     toastTimer = setTimeout(function () { ui.toast = null; render(); }, 3000);
   }
-
+  // ---------- data loading ----------
+  function loadSession() {
+    return api("GET", "/me").then(function (r) { S.auth = r.ok ? r.data.user : null; S.me = r.ok ? r.data.employee : null; })
+      .then(function () { if (!S.meta.jobTitles.length) return api("GET", "/meta").then(function (r) { if (r.ok) S.meta = r.data; }); })
+      .then(function () { S.ready = true; });
+  }
+  function loadEmployees() {
+    var s = S.search;
+    var qs = "?name=" + encodeURIComponent(s.name) + "&id=" + encodeURIComponent(s.id) + "&job=" + encodeURIComponent(s.job) + "&status=" + encodeURIComponent(s.status) + "&department=" + encodeURIComponent(s.department) + "&limit=100";
+    return api("GET", "/employees" + qs).then(function (r) { if (r.ok) { S.employees = r.data.items; S.employeeTotal = r.data.total; } }).then(loadAllEmployees);
+  }
+  function loadAllEmployees() { return api("GET", "/employees?limit=100").then(function (r) { if (r.ok) S.all = r.data.items; }); }
+  function loadLeaves() {
+    return api("GET", "/leave" + (S.leaveFilter ? "?status=" + encodeURIComponent(S.leaveFilter) : "")).then(function (r) { if (r.ok) S.leaves = r.data.items; })
+      .then(function () { if (!isAdmin()) return api("GET", "/leave/balance").then(function (r) { if (r.ok) S.balances = r.data.balances; }); });
+  }
+  function load() {
+    var r = route(), p = Promise.resolve();
+    if (r === "/dashboard") p = api("GET", "/dashboard").then(function (x) { if (x.ok) S.dashboard = x.data; }).then(loadAllEmployees);
+    else if (r === "/pim/employees") p = loadEmployees();
+    else if (r === "/pim/add") p = loadAllEmployees();
+    else if (r.indexOf("/pim/employee/") === 0) p = api("GET", "/employees/" + encodeURIComponent(r.slice(14))).then(function (x) { S.detail = x.ok ? x.data : null; }).then(loadAllEmployees);
+    else if (r === "/leave/apply" || r === "/leave/list") p = loadLeaves();
+    else if (r === "/time/attendance") p = api("GET", "/attendance").then(function (x) { if (x.ok) S.attendance = x.data; });
+    else if (r === "/my-info") p = api("GET", "/me").then(function (x) { if (x.ok) { S.me = x.data.employee; S.auth = x.data.user; } });
+    return p.then(render, render);
+  }
+  // ---------- views ----------
   function loginView() {
     var r = ui.loginRequired;
     return '<div class="login-wrap"><div class="login"><h1>PeopleDesk</h1><p class="sub">Sign in to your HR workspace</p>' +
-      '<div class="demo">Demo login: <b>Admin</b> / <b>admin123</b></div>' +
+      '<div class="demo">Demo login: <b>Admin</b> / <b>admin123</b><br>Employee (ESS) login: <b>priya.sharma</b> / <b>Welcome@1</b> (any employee as first.last)</div>' +
       (ui.loginError ? '<div class="alert" role="alert"><p class="alert-content-text" style="margin:0">' + esc(ui.loginError) + '</p></div>' : '') +
       '<form id="login-form" novalidate>' +
       '<div class="field' + (r.username ? " has-error" : "") + '"><label for="username">Username</label><input id="username" name="username" placeholder="Username" autocomplete="off">' + (r.username ? '<div class="req">Required</div>' : '') + '</div>' +
       '<div class="field' + (r.password ? " has-error" : "") + '"><label for="password">Password</label><input id="password" name="password" type="password" placeholder="Password">' + (r.password ? '<div class="req">Required</div>' : '') + '</div>' +
-      '<button type="submit" style="width:100%">Login</button></form></div></div>';
+      '<button type="submit" style="width:100%">Login</button></form><p class="demo" style="margin:14px 0 0">REST API: <code>' + esc(API) + '</code></p></div></div>';
   }
-
   function shell(active, title, body) {
-    var links = [["dashboard", "Dashboard", "/dashboard"], ["pim", "PIM", "/pim/employees"], ["leave", "Leave", "/leave/apply"]];
+    var links = [["dashboard", "Dashboard", "/dashboard"], ["pim", "PIM", "/pim/employees"], ["leave", "Leave", "/leave/apply"], ["time", "Time", "/time/attendance"], ["myinfo", "My Info", "/my-info"]];
+    var who = isAdmin() ? "Admin" : (S.auth ? S.auth.name : "");
     return '<div class="shell"><aside><div class="logo">PeopleDesk</div><nav aria-label="Sidebar">' +
       links.map(function (l) { return '<a role="link" tabindex="0" data-go="' + l[2] + '"' + (active === l[0] ? ' class="active" aria-current="page"' : '') + '>' + l[1] + '</a>'; }).join("") +
       '</nav></aside><div class="content"><div class="topbar"><h1>' + esc(title) + '</h1>' +
-      '<div class="user-dropdown"><button class="ghost" data-action="menu" aria-label="User menu">Admin ▾</button>' +
-      (ui.menu ? '<div class="dropdown-menu" role="menu"><a role="menuitem" data-action="logout">Logout</a></div>' : '') +
+      '<div class="user-dropdown"><button class="ghost" data-action="menu" aria-label="User menu" data-test="user-menu">' + esc(who) + ' ▾</button>' +
+      (ui.menu ? '<div class="dropdown-menu" role="menu"><a role="menuitem" data-go="/my-info">My Info</a><a role="menuitem" data-action="logout">Logout</a></div>' : '') +
       '</div></div><div class="page">' + body + '</div></div></div>' +
       (ui.toast ? '<div class="toast" role="status"><div class="toast-title">' + esc(ui.toast.title) + '</div><div class="toast-message">' + esc(ui.toast.text) + '</div></div>' : '') +
       (ui.confirmId ? '<div class="modal-back"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title"><h2 id="confirm-title" style="margin-top:0">Are you sure?</h2>' +
         '<p>The selected record will be permanently deleted. Are you sure you want to continue?</p>' +
         '<div class="actions" style="justify-content:center"><button class="ghost" data-action="cancel-delete">No, Cancel</button><button class="danger" data-action="confirm-delete">Yes, Delete</button></div></div></div>' : '');
   }
-
   function dashboardView() {
-    var e = employees();
-    var pending = leaves().filter(function (l) { return l.status === "Pending Approval"; }).length;
+    var d = S.dashboard || { employees: S.employees.length, byDepartment: [], leavesPending: 0, onLeaveToday: [], punchedIn: 0 };
     return shell("dashboard", "Dashboard",
       '<div class="widgets">' +
-      '<div class="card widget" data-test="widget-employees"><div>Total employees</div><div class="num">' + e.length + '</div></div>' +
-      '<div class="card widget" data-test="widget-leaves"><div>Leave requests pending</div><div class="num">' + pending + '</div></div>' +
-      '<div class="card widget"><div>Time at work</div><div class="num">8h 12m</div></div>' +
-      '</div><div class="card"><h2>Quick launch</h2><div class="actions" style="justify-content:flex-start"><button data-go="/pim/add">Add Employee</button><button class="ghost" data-go="/leave/apply">Apply Leave</button></div></div>');
+      '<div class="card widget" data-test="widget-employees"><div>Total employees</div><div class="num">' + d.employees + '</div></div>' +
+      '<div class="card widget" data-test="widget-leaves"><div>Leave requests pending</div><div class="num">' + d.leavesPending + '</div></div>' +
+      '<div class="card widget" data-test="widget-on-leave"><div>On leave today</div><div class="num">' + d.onLeaveToday.length + '</div></div>' +
+      '<div class="card widget" data-test="widget-punched-in"><div>Punched in now</div><div class="num">' + d.punchedIn + '</div></div>' +
+      '</div><div class="card"><h2>Employees by department</h2><table class="table" aria-label="Employees by department"><thead><tr><th>Department</th><th>Employees</th></tr></thead><tbody>' +
+      d.byDepartment.map(function (x) { return '<tr data-test="dept-row"><td>' + esc(x.department) + '</td><td>' + x.count + '</td></tr>'; }).join("") + '</tbody></table></div>' +
+      '<div class="card"><h2>Quick launch</h2><div class="actions" style="justify-content:flex-start;flex-wrap:wrap">' + (isAdmin() ? '<button data-go="/pim/add">Add Employee</button>' : '') + '<button class="ghost" data-go="/leave/apply">Apply Leave</button><button class="ghost" data-go="/time/attendance">Punch In/Out</button></div></div>');
   }
-
-  function fullName(e) { return [e.first, e.middle, e.last].filter(Boolean).join(" "); }
-
+  function options(list, selected, blank) {
+    return (blank != null ? '<option value="">' + esc(blank) + '</option>' : '') + list.map(function (o) { return '<option' + (o === selected ? " selected" : "") + '>' + esc(o) + '</option>'; }).join("");
+  }
   function employeeListView() {
-    var s = get("search", { name: "", id: "" });
-    var list = employees().filter(function (e) {
-      return (!s.name || fullName(e).toLowerCase().indexOf(s.name.toLowerCase()) >= 0) && (!s.id || e.id === s.id);
-    });
+    var s = S.search, list = S.employees;
     var rows = list.map(function (e) {
-      return '<tr data-test="employee-row"><td>' + esc(e.id) + '</td><td>' + esc(e.first + (e.middle ? " " + e.middle : "")) + '</td><td>' + esc(e.last) + '</td><td>' + esc(e.job) + '</td><td>' + esc(e.status) + '</td>' +
-        '<td><div class="row-actions"><button class="icon" data-edit="' + esc(e.id) + '" aria-label="Edit ' + esc(fullName(e)) + '">Edit</button>' +
-        '<button class="icon" data-delete="' + esc(e.id) + '" aria-label="Delete ' + esc(fullName(e)) + '">Delete</button></div></td></tr>';
+      return '<tr data-test="employee-row" data-id="' + esc(e.id) + '"><td>' + esc(e.id) + '</td><td>' + esc(e.first + (e.middle ? " " + e.middle : "")) + '</td><td>' + esc(e.last) + '</td><td>' + esc(e.job) + '</td><td>' + esc(e.status) + '</td><td>' + esc(e.sub) + '</td>' +
+        '<td><div class="row-actions"><button class="icon" data-edit="' + esc(e.id) + '" aria-label="Edit ' + esc(fullName(e)) + '">' + (isAdmin() ? "Edit" : "View") + '</button>' +
+        (isAdmin() ? '<button class="icon" data-delete="' + esc(e.id) + '" aria-label="Delete ' + esc(fullName(e)) + '">Delete</button>' : '') + '</div></td></tr>';
     }).join("");
     return shell("pim", "PIM",
       '<div class="card"><h2>Employee Information</h2><form id="search-form" class="filters" novalidate>' +
       '<div class="field" style="margin:0"><label for="search-name">Employee Name</label><input id="search-name" placeholder="Type for hints..." value="' + esc(s.name) + '"></div>' +
       '<div class="field" style="margin:0"><label for="search-id">Employee Id</label><input id="search-id" value="' + esc(s.id) + '"></div>' +
+      '<div class="field" style="margin:0"><label for="search-job">Job Title</label><select id="search-job">' + options(S.meta.jobTitles, s.job, "-- Select --") + '</select></div>' +
+      '<div class="field" style="margin:0"><label for="search-status">Employment Status</label><select id="search-status">' + options(S.meta.employmentStatus, s.status, "-- Select --") + '</select></div>' +
+      '<div class="field" style="margin:0"><label for="search-department">Department</label><select id="search-department">' + options(S.meta.departments, s.department, "-- Select --") + '</select></div>' +
       '<div class="actions"><button type="button" class="ghost" data-action="reset-search">Reset</button><button type="submit">Search</button></div></form></div>' +
       '<div class="card"><div class="actions" style="justify-content:space-between;align-items:center"><span class="records" data-test="records-found">' +
       (list.length ? "(" + list.length + ") Record" + (list.length === 1 ? "" : "s") + " Found" : "No Records Found") +
-      '</span><button data-go="/pim/add">+ Add</button></div>' +
-      '<div style="overflow-x:auto"><table class="table" aria-label="Employee list"><thead><tr><th>Id</th><th>First (&amp; Middle) Name</th><th>Last Name</th><th>Job Title</th><th>Employment Status</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table></div></div>');
+      '</span>' + (isAdmin() ? '<button data-go="/pim/add">+ Add</button>' : '') + '</div>' +
+      '<div style="overflow-x:auto"><table class="table" aria-label="Employee list"><thead><tr><th>Id</th><th>First (&amp; Middle) Name</th><th>Last Name</th><th>Job Title</th><th>Employment Status</th><th>Department</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table></div></div>');
   }
-
   function nextId() {
-    var max = employees().reduce(function (m, e) { return Math.max(m, parseInt(e.id, 10) || 0); }, 0);
+    var max = S.employees.reduce(function (m, e) { return Math.max(m, parseInt(e.id, 10) || 0); }, 0);
     return String(max + 1).padStart(4, "0");
   }
-
   function addEmployeeView() {
     var er = ui.addErrors;
+    var f = function (id, label, input, err) { return '<div class="field' + (err ? " has-error" : "") + '"><label for="' + id + '">' + label + '</label>' + input + (err ? '<div class="req">' + esc(err === true ? "Required" : err) + '</div>' : '') + '</div>'; };
     return shell("pim", "PIM",
       '<div class="card"><h2>Add Employee</h2><form id="add-form" novalidate>' +
       '<div class="filters">' +
-      '<div class="field' + (er.first ? " has-error" : "") + '"><label for="firstName">First Name</label><input id="firstName" name="firstName" placeholder="First Name">' + (er.first ? '<div class="req">Required</div>' : '') + '</div>' +
-      '<div class="field"><label for="middleName">Middle Name</label><input id="middleName" name="middleName" placeholder="Middle Name"></div>' +
-      '<div class="field' + (er.last ? " has-error" : "") + '"><label for="lastName">Last Name</label><input id="lastName" name="lastName" placeholder="Last Name">' + (er.last ? '<div class="req">Required</div>' : '') + '</div>' +
-      '<div class="field' + (er.id ? " has-error" : "") + '"><label for="employeeId">Employee Id</label><input id="employeeId" name="employeeId" value="' + nextId() + '">' + (er.id ? '<div class="req">' + esc(er.id) + '</div>' : '') + '</div>' +
-      '<div class="field"><label for="jobTitle">Job Title</label><select id="jobTitle"><option value="">-- Select --</option><option>QA Engineer</option><option>SDET</option><option>Test Lead</option><option>Developer</option></select></div>' +
+      f("firstName", "First Name", '<input id="firstName" name="firstName" placeholder="First Name">', er.first) +
+      f("middleName", "Middle Name", '<input id="middleName" name="middleName" placeholder="Middle Name">') +
+      f("lastName", "Last Name", '<input id="lastName" name="lastName" placeholder="Last Name">', er.last) +
+      f("employeeId", "Employee Id", '<input id="employeeId" name="employeeId" value="' + nextId() + '">', er.id) +
+      f("jobTitle", "Job Title", '<select id="jobTitle">' + options(S.meta.jobTitles, "", "-- Select --") + '</select>') +
+      f("employmentStatus", "Employment Status", '<select id="employmentStatus">' + options(S.meta.employmentStatus, "Full-Time Probation", "-- Select --") + '</select>') +
+      f("department", "Department", '<select id="department">' + options(S.meta.departments, "", "-- Select --") + '</select>') +
+      f("email", "Work Email", '<input id="email" name="email" type="email" placeholder="name@peopledesk.test">', er.email) +
+      f("phone", "Phone", '<input id="phone" name="phone" placeholder="+91 ...">') +
+      f("location", "Location", '<input id="location" name="location" placeholder="City">') +
       '</div><div class="actions"><button type="button" class="ghost" data-go="/pim/employees">Cancel</button><button type="submit">Save</button></div></form></div>');
   }
-
-  function detailsView(id) {
-    var e = employees().filter(function (x) { return x.id === id; })[0];
-    if (!e) return shell("pim", "PIM", '<div class="card">Employee not found.</div>');
-    return shell("pim", "PIM", '<div class="card"><h2 data-test="employee-name">' + esc(fullName(e)) + '</h2>' +
-      '<p>Employee Id: <b data-test="employee-id">' + esc(e.id) + '</b></p><p>Job Title: ' + esc(e.job || "-") + '</p>' +
-      '<div class="actions" style="justify-content:flex-start"><button data-go="/pim/employees">Back to Employee List</button></div></div>');
+  function detailsView() {
+    var d = S.detail;
+    if (!d) return shell("pim", "PIM", '<div class="card">Employee not found.</div>');
+    var e = d.employee, er = ui.editErrors;
+    var edit = ui.editing && d.canEdit;
+    var kv = function (k, v, test) { return '<p>' + k + ': <b' + (test ? ' data-test="' + test + '"' : '') + '>' + esc(v || "-") + '</b></p>'; };
+    var body = '<div class="card"><h2 data-test="employee-name">' + esc(fullName(e)) + '</h2>' +
+      '<p>Employee Id: <b data-test="employee-id">' + esc(e.id) + '</b></p><p>Job Title: <span data-test="employee-job">' + esc(e.job || "-") + '</span></p>' +
+      (edit ? '' : '<div class="filters">' + kv("Employment Status", e.status, "employee-status") + kv("Department", e.sub, "employee-department") + kv("Work Email", e.email, "employee-email") + kv("Phone", e.phone, "employee-phone") + kv("Location", e.location, "employee-location") + kv("Joined", e.joined, "employee-joined") + kv("Reports to", d.manager ? d.manager.name : "", "employee-manager") + '</div>' +
+        (d.reports.length ? '<p>Direct reports: ' + d.reports.map(function (r) { return '<a href="#/pim/employee/' + esc(r.id) + '" data-test="report-link">' + esc(r.name) + '</a>'; }).join(", ") + '</p>' : '')) +
+      (edit ? '<form id="edit-form" novalidate><div class="filters">' +
+        '<div class="field' + (er.first ? " has-error" : "") + '"><label for="editFirst">First Name</label><input id="editFirst" value="' + esc(e.first) + '">' + (er.first ? '<div class="req">Required</div>' : '') + '</div>' +
+        '<div class="field"><label for="editMiddle">Middle Name</label><input id="editMiddle" value="' + esc(e.middle) + '"></div>' +
+        '<div class="field' + (er.last ? " has-error" : "") + '"><label for="editLast">Last Name</label><input id="editLast" value="' + esc(e.last) + '">' + (er.last ? '<div class="req">Required</div>' : '') + '</div>' +
+        (isAdmin() ? '<div class="field"><label for="editJob">Job Title</label><select id="editJob">' + options(S.meta.jobTitles, e.job, "-- Select --") + '</select></div>' +
+          '<div class="field"><label for="editStatus">Employment Status</label><select id="editStatus">' + options(S.meta.employmentStatus, e.status, "-- Select --") + '</select></div>' +
+          '<div class="field"><label for="editDepartment">Department</label><select id="editDepartment">' + options(S.meta.departments, e.sub, "-- Select --") + '</select></div>' : '') +
+        '<div class="field"><label for="editEmail">Work Email</label><input id="editEmail" value="' + esc(e.email) + '"></div>' +
+        '<div class="field"><label for="editPhone">Phone</label><input id="editPhone" value="' + esc(e.phone) + '"></div>' +
+        '<div class="field"><label for="editLocation">Location</label><input id="editLocation" value="' + esc(e.location) + '"></div>' +
+        '</div>' + (ui.editError ? '<div class="alert" role="alert">' + esc(ui.editError) + '</div>' : '') + '<div class="actions"><button type="button" class="ghost" data-action="cancel-edit">Cancel</button><button type="submit" data-test="save-employee">Save</button></div></form>' : '') +
+      '<div class="actions" style="justify-content:flex-start;margin-top:10px"><button data-go="/pim/employees">Back to Employee List</button>' + (d.canEdit && !edit ? '<button class="ghost" data-action="edit" data-test="edit-employee">Edit</button>' : '') + (isAdmin() && !edit ? '<button class="danger" data-delete="' + esc(e.id) + '">Delete</button>' : '') + '</div></div>';
+    return shell("pim", "PIM", body);
   }
-
+  function leaveRows(list) {
+    return list.map(function (l) {
+      var actions = '';
+      if (l.status === "Pending Approval" || l.status === "Scheduled") actions += '<button class="icon" data-cancel-leave="' + l.id + '">Cancel</button>';
+      if (isAdmin() && l.status === "Pending Approval") actions += '<button class="icon" data-approve-leave="' + l.id + '">Approve</button><button class="icon" data-reject-leave="' + l.id + '">Reject</button>';
+      return '<tr data-test="leave-row" data-id="' + l.id + '"><td>' + esc(l.from) + ' to ' + esc(l.to) + '</td><td>' + esc(l.type) + '</td><td>' + l.days + '</td><td><span class="badge" data-test="leave-status">' + esc(l.status) + '</span></td>' + (isAdmin() ? '<td data-test="leave-employee">' + esc(l.employee) + '</td>' : '') + '<td>' + esc(l.comment) + '</td>' +
+        '<td><div class="row-actions">' + actions + '</div></td></tr>';
+    }).join("");
+  }
   function leaveView() {
     var er = ui.leaveErrors;
-    var mine = leaves();
-    var rows = mine.map(function (l, i) {
-      return '<tr data-test="leave-row"><td>' + esc(l.from) + ' to ' + esc(l.to) + '</td><td>' + esc(l.type) + '</td><td>' + l.days + '</td><td><span class="badge" data-test="leave-status">' + esc(l.status) + '</span></td><td>' + esc(l.comment) + '</td>' +
-        '<td>' + (l.status === "Pending Approval" ? '<button class="icon" data-cancel-leave="' + i + '">Cancel</button>' : '') + '</td></tr>';
-    }).join("");
+    var mine = S.leaves;
+    var balances = S.balances.length ? '<div class="card"><h2>Leave balance</h2><div class="widgets">' + S.balances.map(function (b) { return '<div class="widget" data-test="balance-' + b.type.toLowerCase().replace(/\s+/g, "-") + '"><div>' + esc(b.type) + '</div><div class="num">' + b.available + '</div><div style="font-size:12px;color:#5d5d72">of ' + b.entitlement + ' · ' + b.used + ' used · ' + b.pending + ' pending</div></div>'; }).join("") + '</div></div>' : '';
+    var emps = isAdmin() ? '<div class="field"><label for="leaveEmployee">Employee</label><select id="leaveEmployee">' + S.employees.map(function (e) { return '<option value="' + esc(e.id) + '">' + esc(fullName(e)) + '</option>'; }).join("") + '</select></div>' : '';
     return shell("leave", "Leave",
-      '<div class="card"><h2>Apply Leave</h2><form id="leave-form" novalidate><div class="filters">' +
+      balances +
+      '<div class="card"><h2>Apply Leave</h2><form id="leave-form" novalidate><div class="filters">' + emps +
       '<div class="field' + (er.type ? " has-error" : "") + '"><label for="leaveType">Leave Type</label><select id="leaveType"><option value="">-- Select --</option>' +
-      LEAVE_TYPES.map(function (t) { return "<option>" + t + "</option>"; }).join("") + '</select>' + (er.type ? '<div class="req">Required</div>' : '') + '</div>' +
+      S.meta.leaveTypes.map(function (t) { return "<option>" + t + "</option>"; }).join("") + '</select>' + (er.type ? '<div class="req">Required</div>' : '') + '</div>' +
       '<div class="field' + (er.from ? " has-error" : "") + '"><label for="fromDate">From Date</label><input id="fromDate" type="date">' + (er.from ? '<div class="req">' + esc(er.from) + '</div>' : '') + '</div>' +
       '<div class="field' + (er.to ? " has-error" : "") + '"><label for="toDate">To Date</label><input id="toDate" type="date">' + (er.to ? '<div class="req">' + esc(er.to) + '</div>' : '') + '</div>' +
       '</div><div class="field"><label for="comment">Comments</label><textarea id="comment" rows="2"></textarea></div>' +
+      (ui.leaveError ? '<div class="alert" role="alert" data-test="leave-error">' + esc(ui.leaveError) + '</div>' : '') +
       '<div class="actions"><button type="submit">Apply</button></div></form></div>' +
-      '<div class="card"><h2>My Leave List</h2><span class="records" data-test="leave-records">' + (mine.length ? "(" + mine.length + ") Record" + (mine.length === 1 ? "" : "s") + " Found" : "No Records Found") + '</span>' +
-      '<div style="overflow-x:auto"><table class="table" aria-label="My leave list"><thead><tr><th>Date</th><th>Leave Type</th><th>Days</th><th>Status</th><th>Comments</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table></div></div>');
+      '<div class="card"><div class="actions" style="justify-content:space-between;align-items:center"><h2 style="margin:0">' + (isAdmin() ? "Leave List" : "My Leave List") + '</h2><label style="font-size:13px">Status <select id="leave-status-filter" style="width:auto">' + options(S.meta.leaveStatus, S.leaveFilter, "All") + '</select></label></div>' +
+      '<span class="records" data-test="leave-records">' + (mine.length ? "(" + mine.length + ") Record" + (mine.length === 1 ? "" : "s") + " Found" : "No Records Found") + '</span>' +
+      '<div style="overflow-x:auto"><table class="table" aria-label="' + (isAdmin() ? "Leave list" : "My leave list") + '"><thead><tr><th>Date</th><th>Leave Type</th><th>Days</th><th>Status</th>' + (isAdmin() ? '<th>Employee</th>' : '') + '<th>Comments</th><th>Actions</th></tr></thead><tbody>' + leaveRows(mine) + '</tbody></table></div></div>');
   }
-
+  function attendanceView() {
+    var a = S.attendance;
+    var rows = a.items.slice().reverse().map(function (p) {
+      var hrs = p.out ? ((new Date(p.out) - new Date(p.in)) / 3600000).toFixed(2) + " h" : "—";
+      return '<tr data-test="punch-row"><td>' + esc(new Date(p.in).toLocaleString()) + '</td><td>' + (p.out ? esc(new Date(p.out).toLocaleString()) : '<span class="badge">In progress</span>') + '</td><td>' + hrs + '</td><td>' + esc(p.note) + '</td></tr>';
+    }).join("");
+    return shell("time", "Time",
+      '<div class="card"><h2>Attendance</h2><p>Status: <b data-test="punch-status">' + (a.open ? "Punched in at " + esc(new Date(a.open.in).toLocaleTimeString()) : "Punched out") + '</b></p>' +
+      '<form id="punch-form" novalidate><div class="field"><label for="punchNote">Note</label><input id="punchNote" placeholder="Optional note"></div>' +
+      '<div class="actions" style="justify-content:flex-start">' + (a.open ? '<button type="submit" data-punch="out" data-test="punch-out">Punch Out</button>' : '<button type="submit" data-punch="in" data-test="punch-in">Punch In</button>') + '</div></form></div>' +
+      '<div class="card"><h2>My records</h2><span class="records" data-test="punch-records">' + (a.items.length ? "(" + a.items.length + ") Record" + (a.items.length === 1 ? "" : "s") + " Found" : "No Records Found") + '</span>' +
+      '<div style="overflow-x:auto"><table class="table" aria-label="Attendance records"><thead><tr><th>Punch In</th><th>Punch Out</th><th>Duration</th><th>Note</th></tr></thead><tbody>' + rows + '</tbody></table></div></div>');
+  }
+  function myInfoView() {
+    var e = S.me;
+    if (!e) return shell("myinfo", "My Info", '<div class="card"><h2>' + esc(S.auth.name) + '</h2><p>Role: <b data-test="my-role">' + esc(S.auth.role) + '</b></p><p>The Admin account is not linked to an employee record.</p></div>');
+    return shell("myinfo", "My Info", '<div class="card"><h2 data-test="my-name">' + esc(fullName(e)) + '</h2><p>Role: <b data-test="my-role">' + esc(S.auth.role) + '</b> · Employee Id <b data-test="my-id">' + esc(e.id) + '</b></p>' +
+      '<div class="filters"><p>Job Title: <b>' + esc(e.job) + '</b></p><p>Department: <b>' + esc(e.sub) + '</b></p><p>Email: <b data-test="my-email">' + esc(e.email) + '</b></p><p>Phone: <b>' + esc(e.phone || "-") + '</b></p><p>Location: <b>' + esc(e.location || "-") + '</b></p><p>Joined: <b>' + esc(e.joined) + '</b></p></div>' +
+      '<div class="actions" style="justify-content:flex-start"><button data-go="/pim/employee/' + esc(e.id) + '">Open my record</button><button class="ghost" data-go="/leave/apply">My leave</button></div></div>');
+  }
+  /* Elements carry data-test (Saucedemo/OrangeHRM style); data-testid is mirrored so Playwright's default getByTestId works too. */
+  function mirrorTestIds() { var els = app.querySelectorAll("[data-test]"); for (var i = 0; i < els.length; i++) if (!els[i].hasAttribute("data-testid")) els[i].setAttribute("data-testid", els[i].getAttribute("data-test")); }
   function render() {
     var r = route();
+    if (!S.ready) { app.innerHTML = '<div class="login-wrap"><div class="login"><h1>PeopleDesk</h1><p class="sub">Loading…</p></div></div>'; return; }
     if (!location.hash.replace(/^#\/?/, "")) { location.replace("#/auth/login"); return; }
-    if (r !== "/auth/login" && !loggedIn()) { location.replace("#/auth/login"); return; }
+    if (r !== "/auth/login" && !S.auth) { location.replace("#/auth/login"); return; }
     var html;
     if (r === "/auth/login") html = loginView();
     else if (r === "/dashboard") html = dashboardView();
     else if (r === "/pim/employees") html = employeeListView();
-    else if (r === "/pim/add") html = addEmployeeView();
-    else if (r.indexOf("/pim/employee/") === 0) html = detailsView(r.slice(14));
-    else if (r === "/leave/apply") html = leaveView();
+    else if (r === "/pim/add") html = isAdmin() ? addEmployeeView() : shell("pim", "PIM", '<div class="card">Only an Admin can add employees.</div>');
+    else if (r.indexOf("/pim/employee/") === 0) html = detailsView();
+    else if (r === "/leave/apply" || r === "/leave/list") html = leaveView();
+    else if (r === "/time/attendance") html = attendanceView();
+    else if (r === "/my-info") html = myInfoView();
     else html = shell("", "Not found", '<div class="card">Page not found.</div>');
     app.innerHTML = html;
+    mirrorTestIds();
     document.title = "PeopleDesk HR";
   }
-
   function rerenderKeep(ids) {
     var vals = {};
     ids.forEach(function (id) { var el = document.getElementById(id); if (el) vals[id] = el.value; });
     render();
     ids.forEach(function (id) { var el = document.getElementById(id); if (el && vals[id] != null) el.value = vals[id]; });
   }
-
+  function onRoute() { ui.editing = false; ui.editErrors = {}; ui.editError = ""; if (!S.auth && route() !== "/auth/login") return render(); load(); }
+  function fail(r, fallback) { return r.data && r.data.error ? r.data.error.message : fallback; }
+  // ---------- events ----------
   app.addEventListener("click", function (e) {
-    var t = e.target.closest("[data-go],[data-action],[data-delete],[data-edit],[data-cancel-leave]");
+    var t = e.target.closest("[data-go],[data-action],[data-delete],[data-edit],[data-cancel-leave],[data-approve-leave],[data-reject-leave]");
     if (!t) { if (ui.menu) { ui.menu = false; render(); } return; }
     if (t.dataset.action === "menu") { ui.menu = !ui.menu; return render(); }
     ui.menu = false;
-    if (t.dataset.go) { ui.addErrors = {}; ui.leaveErrors = {}; if (route() === t.dataset.go) return render(); return go(t.dataset.go); }
+    if (t.dataset.go) { ui.addErrors = {}; ui.leaveErrors = {}; ui.leaveError = ""; if (route() === t.dataset.go) return load(); return go(t.dataset.go); }
     if (t.dataset.edit) return go("/pim/employee/" + t.dataset.edit);
     if (t.dataset.delete) { ui.confirmId = t.dataset.delete; return render(); }
     if (t.dataset.action === "cancel-delete") { ui.confirmId = null; return render(); }
     if (t.dataset.action === "confirm-delete") {
       var id = ui.confirmId; ui.confirmId = null;
-      set("employees", employees().filter(function (x) { return x.id !== id; }));
-      toast("Success", "Successfully Deleted");
-      return render();
+      return api("DELETE", "/employees/" + encodeURIComponent(id)).then(function (r) {
+        if (!r.ok) { toast("Error", fail(r, "Could not delete")); return render(); }
+        toast("Success", "Successfully Deleted");
+        return loadAllEmployees().then(function () { if (route() !== "/pim/employees") return go("/pim/employees"); return load(); });
+      });
     }
-    if (t.dataset.cancelLeave != null) {
-      var ls = leaves(); ls[+t.dataset.cancelLeave].status = "Cancelled"; set("leaves", ls);
-      toast("Success", "Successfully Updated");
-      return render();
-    }
-    if (t.dataset.action === "reset-search") { del("search"); return render(); }
-    if (t.dataset.action === "logout") { del("auth"); return go("/auth/login"); }
+    if (t.dataset.action === "edit") { ui.editing = true; return render(); }
+    if (t.dataset.action === "cancel-edit") { ui.editing = false; ui.editErrors = {}; ui.editError = ""; return render(); }
+    if (t.dataset.cancelLeave != null) return api("POST", "/leave/" + t.dataset.cancelLeave + "/cancel").then(function (r) { toast(r.ok ? "Success" : "Error", r.ok ? "Successfully Updated" : fail(r, "Could not cancel")); return load(); });
+    if (t.dataset.approveLeave != null) return api("POST", "/leave/" + t.dataset.approveLeave + "/approve").then(function (r) { toast(r.ok ? "Success" : "Error", r.ok ? "Successfully Approved" : fail(r, "Could not approve")); return load(); });
+    if (t.dataset.rejectLeave != null) return api("POST", "/leave/" + t.dataset.rejectLeave + "/reject").then(function (r) { toast(r.ok ? "Success" : "Error", r.ok ? "Successfully Rejected" : fail(r, "Could not reject")); return load(); });
+    if (t.dataset.action === "reset-search") { S.search = { name: "", id: "", job: "", status: "", department: "" }; return load(); }
+    if (t.dataset.action === "logout") { return api("POST", "/auth/logout").then(function () { S.auth = null; S.me = null; go("/auth/login"); }); }
   });
-
+  app.addEventListener("change", function (e) {
+    if (e.target.id === "leave-status-filter") { S.leaveFilter = e.target.value; return load(); }
+  });
   app.addEventListener("submit", function (e) {
     e.preventDefault();
     var f = e.target;
+    var v = function (id) { var el = document.getElementById(id); return el ? el.value.trim() : ""; };
     if (f.id === "login-form") {
-      var u = document.getElementById("username").value, p = document.getElementById("password").value;
-      ui.loginRequired = { username: !u.trim(), password: !p };
+      var u = v("username"), p = document.getElementById("password").value;
+      ui.loginRequired = { username: !u, password: !p };
       ui.loginError = "";
-      if (u.trim() && p) {
-        if (u.trim() === "Admin" && p === "admin123") { set("auth", true); ui.loginRequired = {}; return go("/dashboard"); }
-        ui.loginError = "Invalid credentials";
-      }
-      return rerenderKeep(["username"]);
+      if (!u || !p) return rerenderKeep(["username"]);
+      return api("POST", "/auth/login", { username: u, password: p }).then(function (r) {
+        if (!r.ok) { ui.loginError = fail(r, "Invalid credentials"); return rerenderKeep(["username"]); }
+        S.auth = r.data.user; ui.loginRequired = {};
+        return go("/dashboard");
+      });
     }
     if (f.id === "search-form") {
-      set("search", { name: document.getElementById("search-name").value.trim(), id: document.getElementById("search-id").value.trim() });
-      return render();
+      S.search = { name: v("search-name"), id: v("search-id"), job: v("search-job"), status: v("search-status"), department: v("search-department") };
+      return load();
     }
     if (f.id === "add-form") {
-      var first = document.getElementById("firstName").value.trim(), middle = document.getElementById("middleName").value.trim();
-      var last = document.getElementById("lastName").value.trim(), id = document.getElementById("employeeId").value.trim();
-      var job = document.getElementById("jobTitle").value;
-      ui.addErrors = { first: !first, last: !last, id: !id ? "Required" : (employees().some(function (x) { return x.id === id; }) ? "Employee Id already exists" : "") };
-      if (ui.addErrors.first || ui.addErrors.last || ui.addErrors.id) return rerenderKeep(["firstName", "middleName", "lastName", "employeeId", "jobTitle"]);
-      var list = employees(); list.push({ id: id, first: first, middle: middle, last: last, job: job, status: "Full-Time Probation", sub: "" });
-      set("employees", list); ui.addErrors = {};
-      toast("Success", "Successfully Saved");
-      return go("/pim/employee/" + id);
+      var first = v("firstName"), middle = v("middleName"), last = v("lastName"), id = v("employeeId");
+      ui.addErrors = { first: !first, last: !last, id: !id ? "Required" : (S.employees.some(function (x) { return x.id === id; }) ? "Employee Id already exists" : "") };
+      if (ui.addErrors.first || ui.addErrors.last || ui.addErrors.id) return rerenderKeep(["firstName", "middleName", "lastName", "employeeId", "jobTitle", "employmentStatus", "department", "email", "phone", "location"]);
+      var body = { firstName: first, middleName: middle, lastName: last, employeeId: id, jobTitle: v("jobTitle"), employmentStatus: v("employmentStatus") || "Full-Time Probation", department: v("department"), email: v("email"), phone: v("phone"), location: v("location") };
+      return api("POST", "/employees", body).then(function (r) {
+        if (!r.ok) {
+          var d = r.data.error && r.data.error.details || {};
+          ui.addErrors = { first: !!d.firstName, last: !!d.lastName, id: d.employeeId || "", email: d.email || "" };
+          if (!d.firstName && !d.lastName && !d.employeeId && !d.email) toast("Error", fail(r, "Could not save"));
+          return rerenderKeep(["firstName", "middleName", "lastName", "employeeId", "jobTitle", "employmentStatus", "department", "email", "phone", "location"]);
+        }
+        ui.addErrors = {};
+        toast("Success", "Successfully Saved");
+        return loadAllEmployees().then(function () { go("/pim/employee/" + r.data.employee.id); });
+      });
+    }
+    if (f.id === "edit-form") {
+      var patch = { firstName: v("editFirst"), middleName: v("editMiddle"), lastName: v("editLast"), email: v("editEmail"), phone: v("editPhone"), location: v("editLocation") };
+      if (isAdmin()) { patch.jobTitle = v("editJob"); patch.employmentStatus = v("editStatus"); patch.department = v("editDepartment"); }
+      ui.editErrors = { first: !patch.firstName, last: !patch.lastName };
+      if (ui.editErrors.first || ui.editErrors.last) return rerenderKeep(["editFirst", "editMiddle", "editLast", "editEmail", "editPhone", "editLocation"]);
+      return api("PATCH", "/employees/" + encodeURIComponent(S.detail.employee.id), patch).then(function (r) {
+        if (!r.ok) { ui.editError = fail(r, "Could not save"); return render(); }
+        ui.editing = false; ui.editError = "";
+        toast("Success", "Successfully Updated");
+        return load();
+      });
     }
     if (f.id === "leave-form") {
-      var type = document.getElementById("leaveType").value, from = document.getElementById("fromDate").value, to = document.getElementById("toDate").value;
-      var comment = document.getElementById("comment").value.trim();
+      var type = v("leaveType"), from = v("fromDate"), to = v("toDate"), comment = v("comment");
       ui.leaveErrors = { type: !type, from: !from ? "Required" : "", to: !to ? "Required" : (from && to < from ? "To date should be after from date" : "") };
+      ui.leaveError = "";
       if (ui.leaveErrors.type || ui.leaveErrors.from || ui.leaveErrors.to) return rerenderKeep(["leaveType", "fromDate", "toDate", "comment"]);
-      var days = Math.round((new Date(to) - new Date(from)) / 86400000) + 1;
-      var ls = leaves(); ls.push({ type: type, from: from, to: to, days: days, comment: comment, status: "Pending Approval" }); set("leaves", ls);
-      ui.leaveErrors = {};
-      toast("Success", "Successfully Submitted");
-      return render();
+      var body2 = { leaveType: type, fromDate: from, toDate: to, comment: comment };
+      if (isAdmin()) body2.employeeId = v("leaveEmployee");
+      return api("POST", "/leave", body2).then(function (r) {
+        if (!r.ok) { ui.leaveError = fail(r, "Could not submit"); return rerenderKeep(["leaveType", "fromDate", "toDate", "comment"]); }
+        ui.leaveErrors = {};
+        toast("Success", "Successfully Submitted");
+        return load();
+      });
+    }
+    if (f.id === "punch-form") {
+      var btn = e.submitter || f.querySelector("[data-punch]");
+      var type = btn ? btn.dataset.punch : (S.attendance.open ? "out" : "in");
+      return api("POST", "/attendance/punch", { type: type, note: v("punchNote") }).then(function (r) {
+        toast(r.ok ? "Success" : "Error", r.ok ? (type === "in" ? "Punched In" : "Punched Out") : fail(r, "Could not punch"));
+        return load();
+      });
     }
   });
-
-  window.addEventListener("hashchange", render);
+  window.addEventListener("hashchange", onRoute);
   render();
+  loadSession().then(onRoute, onRoute);
 })();
 </script>
 </body>

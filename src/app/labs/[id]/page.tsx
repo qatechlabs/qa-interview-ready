@@ -56,6 +56,12 @@ export default async function LabPage({ params }: { params: { id: string } }) {
           <h1 className="text-2xl font-bold sm:text-3xl">{s.title}</h1>
           <p className="mt-1 text-sm muted">
             {app.remote ? `Site: ${app.base}, ${app.styledAfter}. Runs on GitHub Actions in your repo.` : `App: ${app.name}, a practice ${app.styledAfter}.`} Login: {app.credentials}.
+            {app.api && (
+              <>
+                {" "}REST API: tests call it as <code>/api/...</code> through the <code>request</code> fixture or <code>page.request</code>;{" "}
+                <a href={app.api} target="_blank" rel="noreferrer" className="accent hover:underline">GET /api lists every endpoint ↗</a>.
+              </>
+            )}
           </p>
         </div>
         {next && (
