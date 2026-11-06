@@ -273,6 +273,8 @@
       '<div class="filters"><p>Job Title: <b>' + esc(e.job) + '</b></p><p>Department: <b>' + esc(e.sub) + '</b></p><p>Email: <b data-test="my-email">' + esc(e.email) + '</b></p><p>Phone: <b>' + esc(e.phone || "-") + '</b></p><p>Location: <b>' + esc(e.location || "-") + '</b></p><p>Joined: <b>' + esc(e.joined) + '</b></p></div>' +
       '<div class="actions" style="justify-content:flex-start"><button data-go="/pim/employee/' + esc(e.id) + '">Open my record</button><button class="ghost" data-go="/leave/apply">My leave</button></div></div>');
   }
+  /* Elements carry data-test (Saucedemo/OrangeHRM style); data-testid is mirrored so Playwright's default getByTestId works too. */
+  function mirrorTestIds() { var els = app.querySelectorAll("[data-test]"); for (var i = 0; i < els.length; i++) if (!els[i].hasAttribute("data-testid")) els[i].setAttribute("data-testid", els[i].getAttribute("data-test")); }
   function render() {
     var r = route();
     if (!S.ready) { app.innerHTML = '<div class="login-wrap"><div class="login"><h1>PeopleDesk</h1><p class="sub">Loading…</p></div></div>'; return; }
@@ -289,6 +291,7 @@
     else if (r === "/my-info") html = myInfoView();
     else html = shell("", "Not found", '<div class="card">Page not found.</div>');
     app.innerHTML = html;
+    mirrorTestIds();
     document.title = "PeopleDesk HR";
   }
   function rerenderKeep(ids) {

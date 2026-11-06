@@ -91,7 +91,7 @@
     get cart() { return cartIds(); },
     get cartItems() { return S.cart.items.map(function (i) { return { id: i.productId, qty: i.qty }; }); },
     get cartTotals() { return { subtotal: S.cart.subtotal, discount: S.cart.discount, tax: S.cart.tax, total: S.cart.total, coupon: S.cart.coupon }; },
-    get lastOrder() { return S.lastOrder; },
+    get lastOrder() { var o = S.lastOrder; return o ? { id: o.id, items: o.items.map(function (i) { return i.name; }), lines: o.items, subtotal: o.subtotal, discount: o.discount, coupon: o.coupon, tax: o.tax, total: o.total, status: o.status, payment: o.payment, info: o.info } : null; },
     get orders() { return S.orders; },
     get ready() { return S.ready; },
     reset: function () { return api("POST", "/reset").then(function () { S.user = null; S.cart = { items: [], count: 0, subtotal: 0, coupon: null, discount: 0, tax: 0, total: 0 }; S.orders = []; S.lastOrder = null; S.info = null; location.hash = "#/"; render(); }); },
@@ -273,6 +273,8 @@
   }
 
   var EMPTY_CART = { items: [], count: 0, subtotal: 0, coupon: null, discount: 0, tax: 0, total: 0 };
+  /* Elements carry data-test (Saucedemo/OrangeHRM style); data-testid is mirrored so Playwright's default getByTestId works too. */
+  function mirrorTestIds() { var els = app.querySelectorAll("[data-test]"); for (var i = 0; i < els.length; i++) if (!els[i].hasAttribute("data-testid")) els[i].setAttribute("data-testid", els[i].getAttribute("data-test")); }
   function render() {
     var r = route();
     if (!S.ready) { app.innerHTML = '<div class="login"><h1>SwagShop</h1><p class="dim" style="text-align:center">Loading…</p></div>'; return; }
@@ -294,6 +296,7 @@
     else if (r === "/account") html = accountView();
     else html = header() + '<main><h2>Page not found</h2></main>';
     app.innerHTML = html;
+    mirrorTestIds();
     var titles = { "/": "SwagShop", "/inventory": "SwagShop | Products", "/cart": "SwagShop | Cart", "/orders": "SwagShop | My Orders", "/account": "SwagShop | My Account" };
     document.title = titles[r] || (S.product && r.indexOf("/item/") === 0 ? "SwagShop | " + S.product.name : "SwagShop");
   }
@@ -305,7 +308,8 @@
     else if (r.indexOf("/item/") === 0) p = api("GET", "/products/" + encodeURIComponent(r.slice(6))).then(function (x) { S.product = x.ok ? x.data : null; });
     else if (r === "/orders" || r === "/account") p = api("GET", "/orders").then(function (x) { if (x.ok) S.orders = x.data.items; });
     else if (r.indexOf("/orders/") === 0) p = api("GET", "/orders/" + encodeURIComponent(r.slice(8))).then(function (x) { S.order = x.ok ? x.data.order : null; });
-    else if (r === "/checkout-step-two" || r === "/cart") p = refreshCart();
+    else if (r === "/checkout-step-two") p = api("GET", "/checkout/summary").then(function (x) { if (x.ok) { S.info = x.data.info; delete x.data.info; S.cart = x.data; } });
+    else if (r === "/cart" || r === "/checkout-step-one") p = refreshCart().then(function () { if (!S.info) return api("GET", "/checkout/summary").then(function (x) { if (x.ok) S.info = x.data.info; }); });
     else p = Promise.resolve();
     if (S.user && (r === "/inventory" || r.indexOf("/item/") === 0)) p = p.then(refreshCart);
     return p.then(render, render);

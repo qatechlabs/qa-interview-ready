@@ -12,6 +12,8 @@ export interface LabApp {
   credentials: string;
   /** A real public site: labs run in GitHub Actions in the learner's repo instead of the in-browser runner. `base` is the absolute URL. */
   remote?: boolean;
+  /** Base of the practice app's REST API; `GET <api>` lists the endpoints. Tests reach it as /api/... through the request fixture. */
+  api?: string;
 }
 
 export const LAB_APPS: LabApp[] = [
@@ -21,8 +23,9 @@ export const LAB_APPS: LabApp[] = [
     styledAfter: "e-commerce demo store (Saucedemo-style)",
     icon: "🛒",
     base: "/sandbox/swagshop",
-    blurb: "Login with test users, product sorting, cart and a three-step checkout with tax.",
+    blurb: "A full store on a REST API: test users, search, categories, sorting, quantities, coupons, a three-step checkout with tax, order history and cancellation.",
     credentials: "standard_user, locked_out_user, problem_user, performance_glitch_user / secret_sauce",
+    api: "/api/sandbox/swagshop",
   },
   {
     id: "peopledesk",
@@ -30,8 +33,9 @@ export const LAB_APPS: LabApp[] = [
     styledAfter: "HR management portal (OrangeHRM-style)",
     icon: "🧑‍💼",
     base: "/sandbox/peopledesk",
-    blurb: "Admin login, employee search, add and delete employees, apply for leave with date validation.",
-    credentials: "Admin / admin123",
+    blurb: "An HR portal on a REST API: admin and employee roles, employee search, add, edit and delete, leave balances, approvals and attendance.",
+    credentials: "Admin / admin123, or any employee as first.last / Welcome@1 (for example vikram.singh)",
+    api: "/api/sandbox/peopledesk",
   },
   {
     id: "trendkart",
@@ -39,8 +43,9 @@ export const LAB_APPS: LabApp[] = [
     styledAfter: "fashion marketplace (Myntra-style)",
     icon: "👗",
     base: "/sandbox/trendkart",
-    blurb: "Search with a loading state, brand and price filters, sorting, size selection, bag, coupons and delivery fee.",
-    credentials: "No login needed",
+    blurb: "A fashion marketplace on a REST API: search with a loading state, filters, sorting, sizes, bag, wishlist, coupons, addresses, checkout and orders.",
+    credentials: "Guest checkout works; members: arya@trendkart.test / Trendy@123 or register",
+    api: "/api/sandbox/trendkart",
   },
   {
     id: "saucedemo",
@@ -144,7 +149,7 @@ export const SCENARIOS: Scenario[] = [
     hints: [
       "Inputs have placeholders, so page.getByPlaceholder('Username') works.",
       "The login button can be found with page.getByRole('button', { name: 'Login' }).",
-      "Every product card has data-test=\"inventory-item\", so getByTestId('inventory-item') returns all six.",
+      "Every product card has data-test=\"inventory-item\", so getByTestId('inventory-item') returns all twelve.",
     ],
     starter:
       header +
@@ -1475,6 +1480,421 @@ test('POST verifyLogin without email is a 400', async ({ request }) => {
       { label: "Tests use the request fixture", test: (c) => codeHas(c, /\{\s*request\s*\}/) },
       { label: "The body is parsed from text", test: (c) => codeHas(c, /JSON\.parse\s*\(/) },
       { label: "The negative case checks responseCode 400", test: (c) => codeHas(c, /400/) },
+    ],
+  },
+  // ---------------- API and UI+API labs (practice apps expose a REST API under /api) ----------------
+  {
+    id: "swagshop-api-login",
+    app: "swagshop",
+    title: "API: login happy path and negative cases",
+    level: "Junior",
+    minutes: 10,
+    free: true,
+    story:
+      "\"Before the UI suite we want API coverage of authentication. Hit POST /api/auth/login with the request fixture: a valid login must return a token and the user, a wrong password must be a 401, the locked-out user must be a 423, and GET /api/me without logging in must be a 401.\"",
+    criteria: [
+      "POST /api/auth/login with standard_user / secret_sauce: assert the response is OK, the body has a token and user.username is standard_user.",
+      "A wrong password returns 401 with error.code invalid_credentials.",
+      "locked_out_user returns 423 with error.code locked.",
+      "GET /api/me before logging in returns 401.",
+    ],
+    hints: [
+      "Playwright gives you an API client: test('...', async ({ request }) => { const res = await request.post('/api/auth/login', { data: { username, password } }); }).",
+      "expect(res).toBeOK() checks for a 2xx; res.status() gives the exact code; await res.json() parses the body.",
+      "GET /api (the API root) lists every endpoint of this practice app with its parameters.",
+      "Each test gets a fresh API session, so GET /api/me in a new test is anonymous.",
+    ],
+    starter:
+      header +
+      `test('valid login returns a token', async ({ request }) => {
+  const res = await request.post('/api/auth/login', { data: { username: 'standard_user', password: 'secret_sauce' } });
+  // TODO: assert the status, the token and user.username
+});
+
+test('wrong password is a 401', async ({ request }) => {
+  // TODO
+});
+
+test('locked out user is a 423', async ({ request }) => {
+  // TODO
+});
+
+test('GET /api/me without a session is a 401', async ({ request }) => {
+  // TODO
+});
+`,
+    minAssertions: 4,
+    skills: ["API testing", "request fixture", "Status codes", "Negative tests"],
+    checks: [
+      { label: "Tests use the request fixture", test: (c) => codeHas(c, /\{\s*request\s*\}/) },
+      { label: "A valid login was asserted (token or username)", test: (c) => codeHas(c, /token|username/) && c.result.assertions.passed >= 1 },
+      { label: "You asserted the 401 for a wrong password", test: (c) => codeHas(c, /401/) },
+      { label: "You asserted the 423 for the locked-out user", test: (c) => codeHas(c, /423/) },
+      { label: "At least three tests ran and passed", test: (c) => c.result.tests.filter((t) => t.ok).length >= 3 },
+    ],
+  },
+  {
+    id: "swagshop-api-cart",
+    app: "swagshop",
+    title: "API: cart maths, coupons and stock rules",
+    level: "Mid",
+    minutes: 15,
+    free: false,
+    story:
+      "\"The cart service owns the money maths, so test it at the API: add two products with quantities, check the subtotal and 8% tax, apply SAVE10 and check the discount, prove an out-of-stock product is refused, then change a quantity and remove a line.\"",
+    criteria: [
+      "Log in through the API, then POST /api/cart/items for productId 4 with qty 2 and productId 0 (qty 1). Assert count 3 and subtotal 45.97.",
+      "Apply coupon SAVE10 (POST /api/cart/coupon) and assert discount 4.6 and total 44.68 (tax is 8% after the discount).",
+      "Adding productId 10 (out of stock) returns 409.",
+      "PATCH /api/cart/items/4 with qty 1 and DELETE /api/cart/items/0, then assert the cart count is 1.",
+    ],
+    hints: [
+      "The request fixture keeps cookies between calls, so one login at the top of the test is enough for the whole flow.",
+      "Every cart endpoint returns the updated cart: items[], count, subtotal, coupon, discount, tax, total.",
+      "Error bodies look like { error: { code, message } }; assert the status code and the code.",
+      "Use toBeCloseTo for money, or compare the exact numbers the API returns (it rounds to 2 decimals).",
+    ],
+    starter:
+      header +
+      `test.beforeEach(async ({ request }) => {
+  await request.post('/api/auth/login', { data: { username: 'standard_user', password: 'secret_sauce' } });
+});
+
+test('cart totals, coupon, stock rule and line edits', async ({ request }) => {
+  // TODO: add productId 4 (qty 2) and productId 0, assert count and subtotal
+
+  // TODO: apply SAVE10 and assert discount and total
+
+  // TODO: productId 10 is out of stock: expect 409
+
+  // TODO: PATCH qty of product 4 to 1, DELETE product 0, assert count 1
+});
+`,
+    minAssertions: 5,
+    skills: ["API testing", "Session cookies", "Money assertions", "Error handling"],
+    checks: [
+      { label: "Tests use the request fixture", test: (c) => codeHas(c, /\{\s*request\s*\}/) },
+      { label: "Items were added through POST /api/cart/items", test: (c) => codeHas(c, /cart\/items/) },
+      { label: "SAVE10 was applied and its effect asserted", test: (c) => codeHas(c, /SAVE10/) && codeHas(c, /44\.68|4\.6\b/) },
+      { label: "The out-of-stock 409 was asserted", test: (c) => codeHas(c, /409/) },
+      { label: "A line was changed with PATCH and removed with DELETE", test: (c) => codeHas(c, /\.patch\(/) && codeHas(c, /\.delete\(/) },
+      { label: "Every test passed", test: (c) => c.result.ok && c.result.tests.length >= 1 },
+    ],
+  },
+  {
+    id: "swagshop-ui-api-checkout",
+    app: "swagshop",
+    title: "UI + API: seed the cart by API, finish checkout in the UI",
+    level: "Senior",
+    minutes: 20,
+    free: false,
+    story:
+      "\"Our checkout UI tests spend most of their time clicking products into the cart. Seed the state through the API instead: log in, add items and save the shipping info with page.request, then open the overview page, verify what the customer sees, finish the order, and confirm it through GET /api/orders.\"",
+    criteria: [
+      "Use page.request (it shares the browser's cookies) to log in as standard_user, add productId 0 and productId 4 with qty 2, and PUT /api/checkout/info.",
+      "page.goto('/checkout-step-two') and assert the title Checkout: Overview, two item rows and the total label Total: $49.65.",
+      "Click Finish and assert the Thank you for your order! header.",
+      "GET /api/orders with page.request: one order, status placed, total 49.65.",
+    ],
+    hints: [
+      "page.request is an API client bound to the page's cookies, so what you set up there is what the page sees. The plain request fixture has its own cookie jar in real Playwright.",
+      "Item rows on the overview have data-test=\"inventory-item\"; the total is data-test=\"total-label\".",
+      "The app reads the session when it loads, so navigate only after the API calls have finished.",
+      "Keep the API seeding in a helper or a beforeEach so the test body reads like the user journey.",
+    ],
+    starter:
+      header +
+      `test.beforeEach(async ({ page }) => {
+  const api = page.request;
+  // TODO: login, add productId 0 and productId 4 (qty 2), PUT /api/checkout/info { firstName, lastName, postalCode }
+});
+
+test('seeded cart checks out in the UI', async ({ page }) => {
+  await page.goto('/checkout-step-two');
+  // TODO: assert the overview, click Finish, assert the confirmation
+
+  // TODO: GET /api/orders via page.request and assert the order
+});
+`,
+    minAssertions: 4,
+    skills: ["Hybrid UI + API", "page.request", "Test data seeding", "End-to-end verification"],
+    checks: [
+      { label: "State was seeded with page.request", test: (c) => codeHas(c, /page\.request/) && codeHas(c, /cart\/items/) },
+      { label: "The overview page was verified in the UI", test: (c) => codeHas(c, /checkout-step-two/) && usesAny(c, "toHaveText", "toContainText", "toHaveCount", "toBeVisible") },
+      { label: "An order for $49.65 was placed", test: (c) => Math.abs((c.lab?.lastOrder?.total ?? 0) - 49.65) < 0.01 },
+      { label: "The order was confirmed through GET /api/orders", test: (c) => codeHas(c, /\/api\/orders/) && c.result.assertions.passed >= 4 },
+    ],
+  },
+  {
+    id: "peopledesk-api-employee-crud",
+    app: "peopledesk",
+    title: "API: employee CRUD with validation",
+    level: "Mid",
+    minutes: 20,
+    free: false,
+    story:
+      "\"Cover the employee record end to end at the API: create one, read it back through search, update it, delete it, and prove it is gone. Include the validation failure for a missing last name, and check the field-level details the API returns.\"",
+    criteria: [
+      "Log in as Admin / admin123 through POST /api/auth/login.",
+      "POST /api/employees without lastName returns 400 with error.details.lastName.",
+      "Create an employee (firstName, lastName, jobTitle SDET, department Quality Engineering): status 201 and an employee.id.",
+      "GET /api/employees?name=<the name> returns total 1; PATCH the job title to Test Lead and assert it; DELETE the record; GET /api/employees/:id is then 404.",
+    ],
+    hints: [
+      "Job titles and departments are validated against GET /api/meta; Quality Engineering and SDET are valid values.",
+      "Use a unique name per run (for example 'Api' + Date.now()) so the search returns exactly your record.",
+      "The create response is { employee: {...} } with status 201; errors are { error: { code, message, details } }.",
+      "Put the login in test.beforeEach so each test starts authenticated.",
+    ],
+    starter:
+      header +
+      `test.beforeEach(async ({ request }) => {
+  await request.post('/api/auth/login', { data: { username: 'Admin', password: 'admin123' } });
+});
+
+test('missing last name is rejected with field details', async ({ request }) => {
+  // TODO
+});
+
+test('create, search, update and delete an employee', async ({ request }) => {
+  const lastName = 'Api' + Date.now();
+  // TODO
+});
+`,
+    minAssertions: 6,
+    skills: ["API testing", "CRUD", "Validation details", "Unique test data"],
+    checks: [
+      { label: "Tests use the request fixture", test: (c) => codeHas(c, /\{\s*request\s*\}/) },
+      { label: "The 400 and its field details were asserted", test: (c) => codeHas(c, /400/) && codeHas(c, /details/) },
+      { label: "An employee was created (201) and found by search", test: (c) => codeHas(c, /201/) && codeHas(c, /employees\?name=|params/) },
+      { label: "The record was updated with PATCH and removed with DELETE", test: (c) => codeHas(c, /\.patch\(/) && codeHas(c, /\.delete\(/) },
+      { label: "The deleted record returns 404", test: (c) => codeHas(c, /404/) },
+      { label: "Every test passed", test: (c) => c.result.ok && c.result.tests.length >= 2 },
+    ],
+  },
+  {
+    id: "peopledesk-api-leave-workflow",
+    app: "peopledesk",
+    title: "API: leave request workflow across two roles",
+    level: "Senior",
+    minutes: 25,
+    free: false,
+    story:
+      "\"Leave is a two-actor workflow: an employee applies, an admin approves, and the balance moves. Automate it at the API with role switching: Vikram applies for three days of casual leave, cannot approve his own request, the admin approves it, and his available balance drops from 12 to 9.\"",
+    criteria: [
+      "Log in as the employee vikram.singh / Welcome@1 and assert GET /api/leave/balance shows Casual Leave available 12.",
+      "POST /api/leave with toDate before fromDate returns 400 with error.details.toDate; a valid request for 2026-12-10 to 2026-12-12 is created with status Pending Approval and days 3.",
+      "POST /api/leave/:id/approve as the employee returns 403.",
+      "Log out, log in as Admin / admin123, find the request in GET /api/leave?status=Pending Approval, approve it, and assert status Scheduled and the employee's Casual Leave balance: used 3, available 9 (GET /api/leave/balance?employeeId=0004).",
+    ],
+    hints: [
+      "One request context keeps the session: POST /api/auth/logout then POST /api/auth/login switches the user without losing the data created so far.",
+      "Leave rows look like { id, employeeId, employee, type, from, to, days, status }. Balances are { employeeId, balances: [{ type, entitlement, used, pending, available }] }.",
+      "Query parameters can be passed as params: request.get('/api/leave', { params: { status: 'Pending Approval' } }).",
+      "Keep the status strings exact: 'Pending Approval' and 'Scheduled'.",
+    ],
+    starter:
+      header +
+      `const login = (request, username, password) => request.post('/api/auth/login', { data: { username, password } });
+
+test('employee applies, admin approves, balance moves', async ({ request }) => {
+  await login(request, 'vikram.singh', 'Welcome@1');
+  // TODO: balance 12, invalid dates 400, valid request Pending Approval with 3 days, self-approve 403
+
+  await request.post('/api/auth/logout');
+  await login(request, 'Admin', 'admin123');
+  // TODO: find it under Pending Approval, approve, assert Scheduled and balance used 3 / available 9
+});
+`,
+    minAssertions: 6,
+    skills: ["API workflows", "Role switching", "Authorization (403)", "State assertions"],
+    checks: [
+      { label: "Tests use the request fixture", test: (c) => codeHas(c, /\{\s*request\s*\}/) },
+      { label: "Both roles logged in (employee and Admin)", test: (c) => codeHas(c, /vikram\.singh/) && codeHas(c, /Admin/) },
+      { label: "The employee's self-approval 403 was asserted", test: (c) => codeHas(c, /403/) },
+      { label: "The admin approved the request and asserted Scheduled", test: (c) => codeHas(c, /approve/) && codeHas(c, /Scheduled/) },
+      { label: "The balance was asserted after approval", test: (c) => codeHas(c, /balance/) && codeHas(c, /\b9\b/) },
+      { label: "Every test passed", test: (c) => c.result.ok && c.result.assertions.passed >= 6 },
+    ],
+  },
+  {
+    id: "peopledesk-ui-api-seeded-search",
+    app: "peopledesk",
+    title: "UI + API: seed a record by API, verify in the UI, clean up",
+    level: "Senior",
+    minutes: 20,
+    free: false,
+    story:
+      "\"Our PIM search tests create employees through the form, which is slow and leaves junk behind. Create the employee with the API in beforeEach, verify the search in the UI, and delete it with the API in afterEach, asserting the clean-up worked.\"",
+    criteria: [
+      "beforeEach: with page.request, log in as Admin and POST /api/employees for a unique last name; keep the returned employee.id.",
+      "Test: log in through the UI, open PIM, search by the name and assert (1) Record Found and that the row shows the last name.",
+      "afterEach: DELETE /api/employees/:id with page.request and assert GET /api/employees/:id returns 404.",
+      "The test must not create any record through the UI form.",
+    ],
+    hints: [
+      "Share the id between hooks with a variable declared at file level (let id: string) or a custom fixture.",
+      "page.request shares the browser cookies, so after the API login the UI is already authenticated; logging in again through the form is fine too.",
+      "The search box is getByLabel('Employee Name'); the result count has data-test=\"records-found\".",
+      "afterEach runs even when the test fails, which is exactly why clean-up belongs there.",
+    ],
+    starter:
+      header +
+      `let employeeId = '';
+const lastName = 'Seed' + Date.now();
+
+test.beforeEach(async ({ page }) => {
+  // TODO: login and create the employee with page.request
+});
+
+test.afterEach(async ({ page }) => {
+  // TODO: delete the employee with page.request and assert it is gone
+});
+
+test('seeded employee is found by name', async ({ page }) => {
+  // TODO
+});
+`,
+    minAssertions: 3,
+    skills: ["Hybrid UI + API", "beforeEach / afterEach", "Test data clean-up", "page.request"],
+    checks: [
+      { label: "The employee was created with page.request in beforeEach", test: (c) => codeHas(c, /beforeEach/) && codeHas(c, /page\.request/) && codeHas(c, /\.post\([^)]*employees/) },
+      { label: "The search result was asserted in the UI", test: (c) => codeHas(c, /Record Found|records-found/) && usesAny(c, "toHaveText", "toContainText", "toHaveCount") },
+      { label: "Clean-up ran in afterEach with DELETE", test: (c) => codeHas(c, /afterEach/) && codeHas(c, /\.delete\(/) },
+      { label: "The search was narrowed to the seeded record", test: (c) => Array.isArray(c.lab?.results) && c.lab.results.length === 1 },
+      { label: "The 404 after clean-up was asserted", test: (c) => codeHas(c, /404/) && c.result.ok },
+    ],
+  },
+  {
+    id: "trendkart-api-search",
+    app: "trendkart",
+    title: "API: product search, sorting and a 404",
+    level: "Junior",
+    minutes: 10,
+    free: true,
+    story:
+      "\"The search API backs the whole listing page. Test GET /api/products: 'shirt' returns 5 products whose names all contain Shirt, sort=price_asc comes back ascending, a product can be fetched by id, and an unknown id is a 404.\"",
+    criteria: [
+      "GET /api/products?q=shirt: total 5 and every item name contains 'shirt' (case-insensitive).",
+      "GET /api/products?q=shirt&sort=price_asc: prices ascend.",
+      "GET /api/products/104: name Men Printed Round Neck T-shirt, price 399, sizes include M.",
+      "GET /api/products/999: status 404, error.code not_found.",
+    ],
+    hints: [
+      "Query strings can be passed with params: request.get('/api/products', { params: { q: 'shirt', sort: 'price_asc' } }).",
+      "The list response is { items, total, page, pages, facets }; a product is { id, brand, name, price, mrp, sizes, oos, ... }.",
+      "Compare arrays with toEqual: expect(prices).toEqual([...prices].sort((a, b) => a - b)).",
+      "Every endpoint, with its parameters, is listed at GET /api.",
+    ],
+    starter:
+      header +
+      `test('search returns matching products', async ({ request }) => {
+  const res = await request.get('/api/products', { params: { q: 'shirt' } });
+  // TODO
+});
+
+test('price_asc sorts ascending', async ({ request }) => {
+  // TODO
+});
+
+test('product by id and unknown id', async ({ request }) => {
+  // TODO
+});
+`,
+    minAssertions: 4,
+    skills: ["API testing", "Query params", "Array assertions", "404 handling"],
+    checks: [
+      { label: "Tests use the request fixture", test: (c) => codeHas(c, /\{\s*request\s*\}/) },
+      { label: "The shirt search total was asserted", test: (c) => codeHas(c, /shirt/) && codeHas(c, /\b5\b/) },
+      { label: "Ascending prices were asserted", test: (c) => codeHas(c, /price_asc/) && codeHas(c, /sort\(/) },
+      { label: "The 404 was asserted", test: (c) => codeHas(c, /404/) },
+      { label: "At least three tests ran and passed", test: (c) => c.result.tests.filter((t) => t.ok).length >= 3 },
+    ],
+  },
+  {
+    id: "trendkart-api-checkout",
+    app: "trendkart",
+    title: "API: register, bag rules, coupon, order and cancel",
+    level: "Senior",
+    minutes: 25,
+    free: false,
+    story:
+      "\"Write the API journey a new customer takes: register, try to add a product without a size and an out-of-stock size, add three tees, apply TRENDY10, save an address, place a UPI order, see it in the order history and cancel it. Assert the money at every step.\"",
+    criteria: [
+      "POST /api/auth/register with a unique email: status 201 and a token.",
+      "POST /api/bag/items for productId 104 without size is 400 (Please select a size); productId 101 size XL is 409 (out of stock).",
+      "productId 104 size M qty 3 gives totals.total 1197; coupon TRENDY10 gives totals.coupon 120 and total 1077.",
+      "POST /api/addresses, then POST /api/orders { addressId, payment: 'upi' }: status 201, order.status confirmed, totals.total 1077. GET /api/orders has 1 item; POST /api/orders/:id/cancel sets status cancelled.",
+    ],
+    hints: [
+      "Register with 'buyer' + Date.now() + '@example.com' so the run never collides with an existing account.",
+      "Bag responses are { items, coupon, couponLabel, totals: { mrp, discount, coupon, delivery, total, count } }; the delivery fee is waived at ₹999 and above.",
+      "Address fields: name, phone (10 digits), line1, city, state, pincode (6 digits). The create response is { address: { id, ... } }.",
+      "An order is { order: { id, status, totals, items, address, payment } }; GET /api/orders returns { items }.",
+    ],
+    starter:
+      header +
+      `test('new customer journey through the API', async ({ request }) => {
+  const email = 'buyer' + Date.now() + '@example.com';
+  // TODO: register
+
+  // TODO: size rules (400, 409), add 3 x productId 104 size M, totals 1197
+
+  // TODO: TRENDY10 -> coupon 120, total 1077
+
+  // TODO: address, order (upi), orders list, cancel
+});
+`,
+    minAssertions: 8,
+    skills: ["API journeys", "Business rules", "Money assertions", "Order lifecycle"],
+    checks: [
+      { label: "Tests use the request fixture", test: (c) => codeHas(c, /\{\s*request\s*\}/) },
+      { label: "A new account was registered", test: (c) => codeHas(c, /auth\/register/) },
+      { label: "The size rules were asserted (400 and 409)", test: (c) => codeHas(c, /400/) && codeHas(c, /409/) },
+      { label: "TRENDY10 and the ₹1,077 total were asserted", test: (c) => codeHas(c, /TRENDY10/) && codeHas(c, /1077/) },
+      { label: "An order was placed and cancelled", test: (c) => codeHas(c, /\/api\/orders/) && codeHas(c, /cancel/) },
+      { label: "Every test passed", test: (c) => c.result.ok && c.result.assertions.passed >= 8 },
+    ],
+  },
+  {
+    id: "trendkart-ui-api-bag",
+    app: "trendkart",
+    title: "UI + API: build the bag by API, check out in the UI",
+    level: "Senior",
+    minutes: 20,
+    free: false,
+    story:
+      "\"Checkout is the page that matters, so get there fast: put three tees in the bag and apply TRENDY10 with page.request, then open the bag, verify the price breakdown the customer sees, enter a delivery address, confirm the order, and check the order through the API.\"",
+    criteria: [
+      "With page.request: POST /api/bag/items { productId: 104, size: 'M', qty: 3 } and POST /api/bag/coupon { code: 'TRENDY10' }.",
+      "page.goto('/bag'): one bag item, coupon discount -₹120 and total amount ₹1,077.",
+      "Click PLACE ORDER, fill the delivery address, click CONFIRM ORDER and assert the order confirmation is visible.",
+      "GET /api/orders with page.request: one order with totals.total 1077 and status confirmed.",
+    ],
+    hints: [
+      "Bag rows are getByTestId('bag-item'); the breakdown uses data-testid coupon-discount and total-amount.",
+      "On the checkout page the address inputs have labels (Full name, Mobile number, Address line, City, State, Pincode) and the button is CONFIRM ORDER.",
+      "The confirmation page has data-testid=\"order-confirmed\" and shows the order id.",
+      "Guests can order; no login is needed for this flow.",
+    ],
+    starter:
+      header +
+      `test.beforeEach(async ({ page }) => {
+  // TODO: seed the bag and coupon with page.request
+});
+
+test('seeded bag checks out in the UI', async ({ page }) => {
+  await page.goto('/bag');
+  // TODO: assert the breakdown, place the order, confirm it via the API
+});
+`,
+    minAssertions: 4,
+    skills: ["Hybrid UI + API", "page.request", "Checkout flow", "Price assertions"],
+    checks: [
+      { label: "The bag was seeded with page.request", test: (c) => codeHas(c, /page\.request/) && codeHas(c, /bag\/items/) && codeHas(c, /TRENDY10/) },
+      { label: "The price breakdown was asserted in the UI", test: (c) => codeHas(c, /1,077|1077/) && usesAny(c, "toHaveText", "toContainText") },
+      { label: "An order for ₹1,077 was confirmed", test: (c) => c.lab?.lastOrder?.totals?.total === 1077 },
+      { label: "The order was verified through GET /api/orders", test: (c) => codeHas(c, /\/api\/orders/) && c.result.ok },
     ],
   },
 ];

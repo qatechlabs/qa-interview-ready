@@ -64,6 +64,27 @@ ${body}
 
 
 /** Builds a Solution for a multi-file scenario; `playwright` becomes the readable bundle of its files. */
+/** REST Assured + TestNG equivalent of an API scenario against a practice app. */
+const restAssured = (name: string, app: string, body: string) => `// REST Assured + TestNG equivalent (pom.xml: io.rest-assured:rest-assured, org.testng:testng)
+import io.restassured.RestAssured;
+import io.restassured.filter.session.SessionFilter;
+import io.restassured.response.Response;
+import io.restassured.specification.RequestSpecification;
+import org.testng.Assert;
+import org.testng.annotations.*;
+import java.util.*;
+import static io.restassured.RestAssured.given;
+
+public class ${name} {
+    @BeforeClass
+    public void setUp() {
+        RestAssured.baseURI = "https://interview.qatechlabs.com/api/sandbox/${app}";
+    }
+
+${body}
+}
+`;
+
 const withFiles = (s: Omit<Solution, "playwright"> & { files: Record<string, string> }): Solution => ({ ...s, playwright: bundle(s.files) });
 
 
@@ -178,7 +199,7 @@ ${javaSwagLogin}
 
         wait.until(ExpectedConditions.urlContains("inventory"));
         Assert.assertEquals(driver.findElement(By.cssSelector("[data-test=title]")).getText(), "Products");
-        Assert.assertEquals(driver.findElements(By.cssSelector("[data-test=inventory-item]")).size(), 6);
+        Assert.assertEquals(driver.findElements(By.cssSelector("[data-test=inventory-item]")).size(), 12);
     }`,
     ),
     notes: [
@@ -1484,7 +1505,7 @@ test('locked out user sees an error', async ({ page }) => {
         login("standard_user");
         wait.until(ExpectedConditions.urlContains("/inventory.html"));
         Assert.assertEquals(driver.findElement(By.cssSelector("[data-test=title]")).getText(), "Products");
-        Assert.assertEquals(driver.findElements(By.cssSelector("[data-test=inventory-item]")).size(), 6);
+        Assert.assertEquals(driver.findElements(By.cssSelector("[data-test=inventory-item]")).size(), 12);
     }
 
     @Test
@@ -1668,7 +1689,7 @@ public class ShopTest extends BaseTest {
     @Test public void sortLowToHighOrdersPrices() {
         inventory.sortBy("lohi");
         List<Double> prices = inventory.prices();
-        Assert.assertEquals(prices.size(), 6);
+        Assert.assertEquals(prices.size(), 12);
         Assert.assertEquals(prices, prices.stream().sorted().toList());
     }
 }
@@ -2960,4 +2981,599 @@ test.describe('Products API @regression', () => {
     selenium: wsSelenium("AutomationExercise"),
     notes: [...WS_NOTES, "UI and API specs share one config and one fixtures file; the request fixture comes from Playwright itself."],
   }),
+  // ---------------- API and UI+API labs ----------------
+  "swagshop-api-login": {
+    playwright:
+      pwHeader +
+      `test('valid login returns a token', async ({ request }) => {
+  const res = await request.post('/api/auth/login', { data: { username: 'standard_user', password: 'secret_sauce' } });
+  expect(res).toBeOK();
+  const body = await res.json();
+  expect(body.token).toMatch(/^swg\\./);
+  expect(body.user.username).toBe('standard_user');
+});
+
+test('wrong password is a 401', async ({ request }) => {
+  const res = await request.post('/api/auth/login', { data: { username: 'standard_user', password: 'wrong' } });
+  expect(res.status()).toBe(401);
+  const body = await res.json();
+  expect(body.error.code).toBe('invalid_credentials');
+});
+
+test('locked out user is a 423', async ({ request }) => {
+  const res = await request.post('/api/auth/login', { data: { username: 'locked_out_user', password: 'secret_sauce' } });
+  expect(res.status()).toBe(423);
+  expect((await res.json()).error.code).toBe('locked');
+});
+
+test('GET /api/me without a session is a 401', async ({ request }) => {
+  const res = await request.get('/api/me');
+  expect(res.status()).toBe(401);
+});
+`,
+    selenium: restAssured(
+      "SwagShopLoginApiTest",
+      "swagshop",
+      `    @Test
+    public void validLoginReturnsToken() {
+        Response res = given().contentType("application/json")
+            .body(Map.of("username", "standard_user", "password", "secret_sauce"))
+            .post("/auth/login");
+        Assert.assertEquals(res.statusCode(), 200);
+        Assert.assertTrue(res.jsonPath().getString("token").startsWith("swg."));
+        Assert.assertEquals(res.jsonPath().getString("user.username"), "standard_user");
+    }
+
+    @Test
+    public void wrongPasswordIs401() {
+        Response res = given().contentType("application/json")
+            .body(Map.of("username", "standard_user", "password", "wrong"))
+            .post("/auth/login");
+        Assert.assertEquals(res.statusCode(), 401);
+        Assert.assertEquals(res.jsonPath().getString("error.code"), "invalid_credentials");
+    }
+
+    @Test
+    public void lockedUserIs423() {
+        Response res = given().contentType("application/json")
+            .body(Map.of("username", "locked_out_user", "password", "secret_sauce"))
+            .post("/auth/login");
+        Assert.assertEquals(res.statusCode(), 423);
+    }
+
+    @Test
+    public void meWithoutSessionIs401() {
+        Assert.assertEquals(given().get("/me").statusCode(), 401);
+    }`,
+    ),
+    notes: [
+      "The request fixture is a real HTTP client with its own cookie jar; each test gets a fresh one, which is why /api/me is anonymous in the last test.",
+      "Assert both the status code and the error code in the body: a 401 with the wrong code is still a bug.",
+      "expect(res).toBeOK() is the quick 2xx check; use res.status() when the exact code is part of the contract.",
+    ],
+  },
+  "swagshop-api-cart": {
+    playwright:
+      pwHeader +
+      `test.beforeEach(async ({ request }) => {
+  const res = await request.post('/api/auth/login', { data: { username: 'standard_user', password: 'secret_sauce' } });
+  expect(res).toBeOK();
+});
+
+test('cart totals, coupon, stock rule and line edits', async ({ request }) => {
+  await request.post('/api/cart/items', { data: { productId: 4, qty: 2 } });
+  let cart = await (await request.post('/api/cart/items', { data: { productId: 0 } })).json();
+  expect(cart.count).toBe(3);
+  expect(cart.subtotal).toBeCloseTo(45.97, 2);
+
+  cart = await (await request.post('/api/cart/coupon', { data: { code: 'SAVE10' } })).json();
+  expect(cart.coupon).toBe('SAVE10');
+  expect(cart.discount).toBeCloseTo(4.6, 2);
+  expect(cart.total).toBeCloseTo(44.68, 2);
+
+  const oos = await request.post('/api/cart/items', { data: { productId: 10 } });
+  expect(oos.status()).toBe(409);
+  expect((await oos.json()).error.message).toContain('out of stock');
+
+  const patched = await request.patch('/api/cart/items/4', { data: { qty: 1 } });
+  expect(patched).toBeOK();
+  cart = await (await request.delete('/api/cart/items/0')).json();
+  expect(cart.count).toBe(1);
+  expect(cart.items).toHaveLength(1);
+  expect(cart.items[0].productId).toBe(4);
+});
+`,
+    selenium: restAssured(
+      "SwagShopCartApiTest",
+      "swagshop",
+      `    @Test
+    public void cartTotalsCouponAndStockRule() {
+        RequestSpecification s = given().contentType("application/json").filter(new SessionFilter());
+        s.body(Map.of("username", "standard_user", "password", "secret_sauce")).post("/auth/login").then().statusCode(200);
+
+        s.body(Map.of("productId", 4, "qty", 2)).post("/cart/items").then().statusCode(201);
+        Response cart = s.body(Map.of("productId", 0)).post("/cart/items");
+        Assert.assertEquals(cart.jsonPath().getInt("count"), 3);
+        Assert.assertEquals(cart.jsonPath().getDouble("subtotal"), 45.97, 0.001);
+
+        cart = s.body(Map.of("code", "SAVE10")).post("/cart/coupon");
+        Assert.assertEquals(cart.jsonPath().getDouble("discount"), 4.6, 0.001);
+        Assert.assertEquals(cart.jsonPath().getDouble("total"), 44.68, 0.001);
+
+        Assert.assertEquals(s.body(Map.of("productId", 10)).post("/cart/items").statusCode(), 409);
+
+        s.body(Map.of("qty", 1)).patch("/cart/items/4").then().statusCode(200);
+        cart = s.delete("/cart/items/0");
+        Assert.assertEquals(cart.jsonPath().getInt("count"), 1);
+    }`,
+    ),
+    notes: [
+      "Playwright's request context stores cookies, so the session created in beforeEach carries into every call of the test.",
+      "Assert derived numbers (discount, tax, total), not just that the call succeeded; that is where cart bugs live.",
+      "In REST Assured the cookies do not persist by default: reuse one RequestSpecification with a SessionFilter or pass the cookie explicitly.",
+    ],
+  },
+  "swagshop-ui-api-checkout": {
+    playwright:
+      pwHeader +
+      `test.beforeEach(async ({ page }) => {
+  const api = page.request;
+  expect(await api.post('/api/auth/login', { data: { username: 'standard_user', password: 'secret_sauce' } })).toBeOK();
+  expect(await api.post('/api/cart/items', { data: { productId: 0 } })).toBeOK();
+  expect(await api.post('/api/cart/items', { data: { productId: 4, qty: 2 } })).toBeOK();
+  expect(await api.put('/api/checkout/info', { data: { firstName: 'Asha', lastName: 'Rao', postalCode: '560001' } })).toBeOK();
+});
+
+test('seeded cart checks out in the UI', async ({ page }) => {
+  await page.goto('/checkout-step-two');
+  await expect(page.getByTestId('title')).toHaveText('Checkout: Overview');
+  await expect(page.getByTestId('inventory-item')).toHaveCount(2);
+  await expect(page.getByTestId('ship-to')).toContainText('Asha Rao');
+  await expect(page.getByTestId('total-label')).toHaveText('Total: $49.65');
+
+  await page.getByRole('button', { name: 'Finish' }).click();
+  await expect(page.getByTestId('complete-header')).toHaveText('Thank you for your order!');
+
+  const orders = await (await page.request.get('/api/orders')).json();
+  expect(orders.items).toHaveLength(1);
+  expect(orders.items[0].status).toBe('placed');
+  expect(orders.items[0].total).toBeCloseTo(49.65, 2);
+});
+`,
+    selenium: javaClass(
+      "SeededCheckoutTest",
+      "/sandbox/swagshop",
+      `    // Seed through REST Assured, then hand the session cookie to the browser.
+    static final String API = "https://interview.qatechlabs.com/api/sandbox/swagshop";
+
+    @Test
+    public void seededCartChecksOutInTheUi() {
+        io.restassured.filter.session.SessionFilter session = new io.restassured.filter.session.SessionFilter();
+        io.restassured.specification.RequestSpecification api = io.restassured.RestAssured.given().baseUri(API).contentType("application/json").filter(session);
+        api.body(Map.of("username", "standard_user", "password", "secret_sauce")).post("/auth/login").then().statusCode(200);
+        api.body(Map.of("productId", 0)).post("/cart/items").then().statusCode(201);
+        api.body(Map.of("productId", 4, "qty", 2)).post("/cart/items").then().statusCode(201);
+        Map<String, String> cookies = api.put("/checkout/info").getCookies(); // session cookies set by the API
+
+        driver.get(BASE + "#/");
+        for (Map.Entry<String, String> c : cookies.entrySet()) driver.manage().addCookie(new Cookie(c.getKey(), c.getValue(), "/"));
+        driver.get(BASE + "#/checkout-step-two");
+        wait.until(ExpectedConditions.textToBe(By.cssSelector("[data-test=title]"), "Checkout: Overview"));
+        Assert.assertEquals(driver.findElements(By.cssSelector("[data-test=inventory-item]")).size(), 2);
+        Assert.assertEquals(driver.findElement(By.cssSelector("[data-test=total-label]")).getText(), "Total: $49.65");
+        driver.findElement(By.id("finish")).click();
+        wait.until(ExpectedConditions.textToBe(By.cssSelector("[data-test=complete-header]"), "Thank you for your order!"));
+    }`,
+    ),
+    notes: [
+      "page.request shares the browser context's cookies, so API seeding and UI steps see the same session. The standalone request fixture does not.",
+      "Seed with the API, verify with the UI, confirm with the API: each layer is used for what it is best at.",
+      "In Selenium there is no shared jar: copy the cookies the API returned into the driver before navigating.",
+    ],
+  },
+  "peopledesk-api-employee-crud": {
+    playwright:
+      pwHeader +
+      `test.beforeEach(async ({ request }) => {
+  expect(await request.post('/api/auth/login', { data: { username: 'Admin', password: 'admin123' } })).toBeOK();
+});
+
+test('missing last name is rejected with field details', async ({ request }) => {
+  const res = await request.post('/api/employees', { data: { firstName: 'Nolast' } });
+  expect(res.status()).toBe(400);
+  const body = await res.json();
+  expect(body.error.code).toBe('validation_error');
+  expect(body.error.details.lastName).toBe('Required');
+});
+
+test('create, search, update and delete an employee', async ({ request }) => {
+  const lastName = 'Api' + Date.now();
+  const created = await request.post('/api/employees', {
+    data: { firstName: 'Priya', lastName, jobTitle: 'SDET', department: 'Quality Engineering', employmentStatus: 'Full-Time Permanent' },
+  });
+  expect(created.status()).toBe(201);
+  const { employee } = await created.json();
+  expect(employee.id).toMatch(/^\\d{4}$/);
+
+  const found = await (await request.get('/api/employees', { params: { name: lastName } })).json();
+  expect(found.total).toBe(1);
+  expect(found.items[0].last).toBe(lastName);
+
+  const updated = await request.patch(\`/api/employees/\${employee.id}\`, { data: { jobTitle: 'Test Lead' } });
+  expect(updated).toBeOK();
+  expect((await updated.json()).employee.job).toBe('Test Lead');
+
+  expect(await request.delete(\`/api/employees/\${employee.id}\`)).toBeOK();
+  const gone = await request.get(\`/api/employees/\${employee.id}\`);
+  expect(gone.status()).toBe(404);
+});
+`,
+    selenium: restAssured(
+      "EmployeeCrudApiTest",
+      "peopledesk",
+      `    RequestSpecification admin;
+
+    @BeforeMethod
+    public void login() {
+        admin = given().contentType("application/json").filter(new SessionFilter());
+        admin.body(Map.of("username", "Admin", "password", "admin123")).post("/auth/login").then().statusCode(200);
+    }
+
+    @Test
+    public void missingLastNameIsRejected() {
+        Response res = admin.body(Map.of("firstName", "Nolast")).post("/employees");
+        Assert.assertEquals(res.statusCode(), 400);
+        Assert.assertEquals(res.jsonPath().getString("error.details.lastName"), "Required");
+    }
+
+    @Test
+    public void createSearchUpdateDelete() {
+        String lastName = "Api" + System.currentTimeMillis();
+        Response created = admin.body(Map.of("firstName", "Priya", "lastName", lastName, "jobTitle", "SDET", "department", "Quality Engineering")).post("/employees");
+        Assert.assertEquals(created.statusCode(), 201);
+        String id = created.jsonPath().getString("employee.id");
+
+        Assert.assertEquals(admin.queryParam("name", lastName).get("/employees").jsonPath().getInt("total"), 1);
+        Assert.assertEquals(admin.body(Map.of("jobTitle", "Test Lead")).patch("/employees/" + id).jsonPath().getString("employee.job"), "Test Lead");
+        admin.delete("/employees/" + id).then().statusCode(200);
+        Assert.assertEquals(admin.get("/employees/" + id).statusCode(), 404);
+    }`,
+    ),
+    notes: [
+      "A unique last name per run keeps the search deterministic and lets the suite run in parallel against the same data.",
+      "Reading the record back (search and GET after DELETE) proves the write happened; a 2xx on the write alone does not.",
+      "Validation details are part of the contract: the UI shows error.details.lastName under the field, so the API test should pin it.",
+    ],
+  },
+  "peopledesk-api-leave-workflow": {
+    playwright:
+      pwHeader +
+      `const login = (request, username: string, password: string) => request.post('/api/auth/login', { data: { username, password } });
+
+test('employee applies, admin approves, balance moves', async ({ request }) => {
+  expect(await login(request, 'vikram.singh', 'Welcome@1')).toBeOK();
+  const before = await (await request.get('/api/leave/balance')).json();
+  expect(before.balances.find((b) => b.type === 'Casual Leave').available).toBe(12);
+
+  const invalid = await request.post('/api/leave', { data: { leaveType: 'Casual Leave', fromDate: '2026-12-10', toDate: '2026-12-08' } });
+  expect(invalid.status()).toBe(400);
+  expect((await invalid.json()).error.details.toDate).toContain('after from date');
+
+  const applied = await request.post('/api/leave', { data: { leaveType: 'Casual Leave', fromDate: '2026-12-10', toDate: '2026-12-12', comment: 'Family trip' } });
+  expect(applied.status()).toBe(201);
+  const { leave } = await applied.json();
+  expect(leave.status).toBe('Pending Approval');
+  expect(leave.days).toBe(3);
+
+  const selfApprove = await request.post(\`/api/leave/\${leave.id}/approve\`);
+  expect(selfApprove.status()).toBe(403);
+
+  await request.post('/api/auth/logout');
+  expect(await login(request, 'Admin', 'admin123')).toBeOK();
+  const pending = await (await request.get('/api/leave', { params: { status: 'Pending Approval' } })).json();
+  expect(pending.items.map((l) => l.id)).toContain(leave.id);
+
+  const approved = await (await request.post(\`/api/leave/\${leave.id}/approve\`, { data: { comment: 'Enjoy' } })).json();
+  expect(approved.leave.status).toBe('Scheduled');
+
+  const after = await (await request.get('/api/leave/balance', { params: { employeeId: '0004' } })).json();
+  const casual = after.balances.find((b) => b.type === 'Casual Leave');
+  expect(casual.used).toBe(3);
+  expect(casual.available).toBe(9);
+});
+`,
+    selenium: restAssured(
+      "LeaveWorkflowApiTest",
+      "peopledesk",
+      `    @Test
+    public void employeeAppliesAdminApproves() {
+        RequestSpecification s = given().contentType("application/json").filter(new SessionFilter());
+        s.body(Map.of("username", "vikram.singh", "password", "Welcome@1")).post("/auth/login").then().statusCode(200);
+        Assert.assertEquals(s.get("/leave/balance").jsonPath().getInt("balances.find { it.type == 'Casual Leave' }.available"), 12);
+
+        Assert.assertEquals(s.body(Map.of("leaveType", "Casual Leave", "fromDate", "2026-12-10", "toDate", "2026-12-08")).post("/leave").statusCode(), 400);
+        Response applied = s.body(Map.of("leaveType", "Casual Leave", "fromDate", "2026-12-10", "toDate", "2026-12-12")).post("/leave");
+        Assert.assertEquals(applied.statusCode(), 201);
+        int id = applied.jsonPath().getInt("leave.id");
+        Assert.assertEquals(applied.jsonPath().getString("leave.status"), "Pending Approval");
+        Assert.assertEquals(s.post("/leave/" + id + "/approve").statusCode(), 403);
+
+        s.post("/auth/logout");
+        s.body(Map.of("username", "Admin", "password", "admin123")).post("/auth/login").then().statusCode(200);
+        Assert.assertEquals(s.body(Map.of("comment", "Enjoy")).post("/leave/" + id + "/approve").jsonPath().getString("leave.status"), "Scheduled");
+        Response balance = s.queryParam("employeeId", "0004").get("/leave/balance");
+        Assert.assertEquals(balance.jsonPath().getInt("balances.find { it.type == 'Casual Leave' }.available"), 9);
+    }`,
+    ),
+    notes: [
+      "Authorization tests (the 403) are as important as the happy path: a workflow where anyone can approve is a security bug.",
+      "Switching roles inside one request context keeps the data the first role created, which is what makes the end-to-end assertion possible.",
+      "Assert the side effect (the balance), not only the status transition; that is what the business actually cares about.",
+    ],
+  },
+  "peopledesk-ui-api-seeded-search": {
+    playwright:
+      pwHeader +
+      `let employeeId = '';
+const lastName = 'Seed' + Date.now();
+
+test.beforeEach(async ({ page }) => {
+  const api = page.request;
+  expect(await api.post('/api/auth/login', { data: { username: 'Admin', password: 'admin123' } })).toBeOK();
+  const created = await api.post('/api/employees', { data: { firstName: 'Zara', lastName, jobTitle: 'QA Engineer', department: 'Quality Engineering' } });
+  expect(created.status()).toBe(201);
+  employeeId = (await created.json()).employee.id;
+});
+
+test.afterEach(async ({ page }) => {
+  expect(await page.request.delete(\`/api/employees/\${employeeId}\`)).toBeOK();
+  expect((await page.request.get(\`/api/employees/\${employeeId}\`)).status()).toBe(404);
+});
+
+test('seeded employee is found by name', async ({ page }) => {
+  await page.goto('/');
+  await page.getByLabel('Username').fill('Admin');
+  await page.getByLabel('Password').fill('admin123');
+  await page.getByRole('button', { name: 'Login' }).click();
+  await page.getByRole('link', { name: 'PIM' }).click();
+
+  await page.getByLabel('Employee Name').fill(lastName);
+  await page.getByRole('button', { name: 'Search' }).click();
+  await expect(page.getByTestId('records-found')).toHaveText('(1) Record Found');
+  await expect(page.getByTestId('employee-row')).toHaveCount(1);
+  await expect(page.getByTestId('employee-row')).toContainText(lastName);
+});
+`,
+    selenium: javaClass(
+      "SeededSearchTest",
+      "/sandbox/peopledesk",
+      `    static final String API = "https://interview.qatechlabs.com/api/sandbox/peopledesk";
+    io.restassured.specification.RequestSpecification api;
+    String lastName, id;
+
+    @BeforeMethod
+    public void seed() {
+        api = io.restassured.RestAssured.given().baseUri(API).contentType("application/json").filter(new io.restassured.filter.session.SessionFilter());
+        api.body(Map.of("username", "Admin", "password", "admin123")).post("/auth/login").then().statusCode(200);
+        lastName = "Seed" + System.currentTimeMillis();
+        id = api.body(Map.of("firstName", "Zara", "lastName", lastName, "jobTitle", "QA Engineer", "department", "Quality Engineering")).post("/employees").jsonPath().getString("employee.id");
+    }
+
+    @Test
+    public void seededEmployeeIsFoundByName() {
+${javaHrLogin}
+        driver.findElement(By.linkText("PIM")).click();
+        driver.findElement(By.id("search-name")).sendKeys(lastName);
+        driver.findElement(By.xpath("//button[text()='Search']")).click();
+        wait.until(ExpectedConditions.textToBe(By.cssSelector("[data-test=records-found]"), "(1) Record Found"));
+        Assert.assertTrue(driver.findElement(By.cssSelector("[data-test=employee-row]")).getText().contains(lastName));
+    }
+
+    @AfterMethod
+    public void cleanUp() {
+        api.delete("/employees/" + id).then().statusCode(200);
+        Assert.assertEquals(api.get("/employees/" + id).statusCode(), 404);
+    }`,
+    ),
+    notes: [
+      "Seeding through the API makes the UI test faster and keeps it focused on the behaviour under test: the search.",
+      "afterEach runs on failure too, so the clean-up never depends on the test passing; asserting the 404 proves the clean-up itself.",
+      "Sharing state between hooks through a file-level variable works for one worker; a custom fixture is the scalable version.",
+    ],
+  },
+  "trendkart-api-search": {
+    playwright:
+      pwHeader +
+      `test('search returns matching products', async ({ request }) => {
+  const res = await request.get('/api/products', { params: { q: 'shirt' } });
+  expect(res).toBeOK();
+  const body = await res.json();
+  expect(body.total).toBe(5);
+  expect(body.items).toHaveLength(5);
+  for (const p of body.items) expect(p.name.toLowerCase()).toContain('shirt');
+});
+
+test('price_asc sorts ascending', async ({ request }) => {
+  const body = await (await request.get('/api/products', { params: { q: 'shirt', sort: 'price_asc' } })).json();
+  const prices = body.items.map((p) => p.price);
+  expect(prices).toEqual([...prices].sort((a, b) => a - b));
+});
+
+test('product by id and unknown id', async ({ request }) => {
+  const tee = await (await request.get('/api/products/104')).json();
+  expect(tee.product.name).toBe('Men Printed Round Neck T-shirt');
+  expect(tee.product.price).toBe(399);
+  expect(tee.product.sizes).toContain('M');
+
+  const missing = await request.get('/api/products/999');
+  expect(missing.status()).toBe(404);
+  expect((await missing.json()).error.code).toBe('not_found');
+});
+`,
+    selenium: restAssured(
+      "ProductSearchApiTest",
+      "trendkart",
+      `    @Test
+    public void searchReturnsMatchingProducts() {
+        Response res = given().queryParam("q", "shirt").get("/products");
+        Assert.assertEquals(res.statusCode(), 200);
+        Assert.assertEquals(res.jsonPath().getInt("total"), 5);
+        for (String name : res.jsonPath().getList("items.name", String.class)) Assert.assertTrue(name.toLowerCase().contains("shirt"), name);
+    }
+
+    @Test
+    public void priceAscSortsAscending() {
+        List<Integer> prices = given().queryParam("q", "shirt").queryParam("sort", "price_asc").get("/products").jsonPath().getList("items.price", Integer.class);
+        Assert.assertEquals(prices, prices.stream().sorted().toList());
+    }
+
+    @Test
+    public void productByIdAndUnknownId() {
+        Response tee = given().get("/products/104");
+        Assert.assertEquals(tee.jsonPath().getString("product.name"), "Men Printed Round Neck T-shirt");
+        Assert.assertEquals(given().get("/products/999").statusCode(), 404);
+    }`,
+    ),
+    notes: [
+      "Pass query parameters with params instead of building strings; Playwright encodes them for you.",
+      "Checking every returned name against the query is a contract test for search relevance, not just for the count.",
+      "A 404 with a stable error.code lets the UI show the right message; pin it in the API test.",
+    ],
+  },
+  "trendkart-api-checkout": {
+    playwright:
+      pwHeader +
+      `test('new customer journey through the API', async ({ request }) => {
+  const email = 'buyer' + Date.now() + '@example.com';
+  const reg = await request.post('/api/auth/register', { data: { name: 'Test Buyer', email, password: 'Buyer@123' } });
+  expect(reg.status()).toBe(201);
+  expect((await reg.json()).token).toMatch(/^tk\\./);
+
+  const noSize = await request.post('/api/bag/items', { data: { productId: 104 } });
+  expect(noSize.status()).toBe(400);
+  expect((await noSize.json()).error.message).toBe('Please select a size');
+
+  const oos = await request.post('/api/bag/items', { data: { productId: 101, size: 'XL' } });
+  expect(oos.status()).toBe(409);
+
+  let bag = await (await request.post('/api/bag/items', { data: { productId: 104, size: 'M', qty: 3 } })).json();
+  expect(bag.totals.total).toBe(1197);
+  expect(bag.totals.count).toBe(3);
+
+  bag = await (await request.post('/api/bag/coupon', { data: { code: 'TRENDY10' } })).json();
+  expect(bag.totals.coupon).toBe(120);
+  expect(bag.totals.total).toBe(1077);
+
+  const addr = await (await request.post('/api/addresses', {
+    data: { name: 'Test Buyer', phone: '9876543210', line1: '12 MG Road', city: 'Bengaluru', state: 'Karnataka', pincode: '560001' },
+  })).json();
+  const placed = await request.post('/api/orders', { data: { addressId: addr.address.id, payment: 'upi' } });
+  expect(placed.status()).toBe(201);
+  const { order } = await placed.json();
+  expect(order.status).toBe('confirmed');
+  expect(order.totals.total).toBe(1077);
+
+  const list = await (await request.get('/api/orders')).json();
+  expect(list.items).toHaveLength(1);
+  expect(list.items[0].id).toBe(order.id);
+
+  const cancelled = await (await request.post(\`/api/orders/\${order.id}/cancel\`)).json();
+  expect(cancelled.order.status).toBe('cancelled');
+});
+`,
+    selenium: restAssured(
+      "CheckoutJourneyApiTest",
+      "trendkart",
+      `    @Test
+    public void newCustomerJourney() {
+        RequestSpecification s = given().contentType("application/json").filter(new SessionFilter());
+        String email = "buyer" + System.currentTimeMillis() + "@example.com";
+        Assert.assertEquals(s.body(Map.of("name", "Test Buyer", "email", email, "password", "Buyer@123")).post("/auth/register").statusCode(), 201);
+
+        Assert.assertEquals(s.body(Map.of("productId", 104)).post("/bag/items").statusCode(), 400);
+        Assert.assertEquals(s.body(Map.of("productId", 101, "size", "XL")).post("/bag/items").statusCode(), 409);
+        Assert.assertEquals(s.body(Map.of("productId", 104, "size", "M", "qty", 3)).post("/bag/items").jsonPath().getInt("totals.total"), 1197);
+        Assert.assertEquals(s.body(Map.of("code", "TRENDY10")).post("/bag/coupon").jsonPath().getInt("totals.total"), 1077);
+
+        int addressId = s.body(Map.of("name", "Test Buyer", "phone", "9876543210", "line1", "12 MG Road", "city", "Bengaluru", "state", "Karnataka", "pincode", "560001")).post("/addresses").jsonPath().getInt("address.id");
+        Response placed = s.body(Map.of("addressId", addressId, "payment", "upi")).post("/orders");
+        Assert.assertEquals(placed.statusCode(), 201);
+        String orderId = placed.jsonPath().getString("order.id");
+        Assert.assertEquals(placed.jsonPath().getInt("order.totals.total"), 1077);
+        Assert.assertEquals(s.get("/orders").jsonPath().getList("items").size(), 1);
+        Assert.assertEquals(s.post("/orders/" + orderId + "/cancel").jsonPath().getString("order.status"), "cancelled");
+    }`,
+    ),
+    notes: [
+      "One long journey test is fine for an API smoke; split it into focused tests once a step starts failing for unrelated reasons.",
+      "Negative cases in the same session (400, 409) prove the rules without leaving anything in the bag.",
+      "Register with a unique email so the test is repeatable; the practice API resets per session, real ones do not.",
+    ],
+  },
+  "trendkart-ui-api-bag": {
+    playwright:
+      pwHeader +
+      `test.beforeEach(async ({ page }) => {
+  const api = page.request;
+  expect(await api.post('/api/bag/items', { data: { productId: 104, size: 'M', qty: 3 } })).toBeOK();
+  expect(await api.post('/api/bag/coupon', { data: { code: 'TRENDY10' } })).toBeOK();
+});
+
+test('seeded bag checks out in the UI', async ({ page }) => {
+  await page.goto('/bag');
+  await expect(page.getByTestId('bag-item')).toHaveCount(1);
+  await expect(page.getByTestId('bag-item-size')).toContainText('M');
+  await expect(page.getByTestId('coupon-discount')).toHaveText('-₹120');
+  await expect(page.getByTestId('total-amount')).toHaveText('₹1,077');
+
+  await page.getByRole('button', { name: 'PLACE ORDER' }).click();
+  await page.getByLabel('Full name').fill('Test Buyer');
+  await page.getByLabel('Mobile number').fill('9876543210');
+  await page.getByLabel('Address line').fill('12 MG Road');
+  await page.getByLabel('City').fill('Bengaluru');
+  await page.getByLabel('State').fill('Karnataka');
+  await page.getByLabel('Pincode').fill('560001');
+  await page.getByRole('button', { name: 'CONFIRM ORDER' }).click();
+  await expect(page.getByTestId('order-confirmed')).toBeVisible();
+
+  const orders = await (await page.request.get('/api/orders')).json();
+  expect(orders.items).toHaveLength(1);
+  expect(orders.items[0].status).toBe('confirmed');
+  expect(orders.items[0].totals.total).toBe(1077);
+});
+`,
+    selenium: javaClass(
+      "SeededBagCheckoutTest",
+      "/sandbox/trendkart",
+      `    static final String API = "https://interview.qatechlabs.com/api/sandbox/trendkart";
+
+    @Test
+    public void seededBagChecksOutInTheUi() {
+        io.restassured.filter.session.SessionFilter session = new io.restassured.filter.session.SessionFilter();
+        io.restassured.specification.RequestSpecification api = io.restassured.RestAssured.given().baseUri(API).contentType("application/json").filter(session);
+        api.body(Map.of("productId", 104, "size", "M", "qty", 3)).post("/bag/items").then().statusCode(201);
+        Map<String, String> cookies = api.body(Map.of("code", "TRENDY10")).post("/bag/coupon").getCookies();
+
+        driver.get(BASE + "#/");
+        for (Map.Entry<String, String> c : cookies.entrySet()) driver.manage().addCookie(new Cookie(c.getKey(), c.getValue(), "/"));
+        driver.get(BASE + "#/bag");
+        wait.until(ExpectedConditions.textToBe(By.cssSelector("[data-testid=total-amount]"), "₹1,077"));
+        Assert.assertEquals(driver.findElements(By.cssSelector("[data-testid=bag-item]")).size(), 1);
+        driver.findElement(By.cssSelector("[data-testid=place-order]")).click();
+        driver.findElement(By.cssSelector("[aria-label='Full name']")).sendKeys("Test Buyer");
+        driver.findElement(By.cssSelector("[aria-label='Mobile number']")).sendKeys("9876543210");
+        driver.findElement(By.cssSelector("[aria-label='Address line']")).sendKeys("12 MG Road");
+        driver.findElement(By.cssSelector("[aria-label='City']")).sendKeys("Bengaluru");
+        driver.findElement(By.cssSelector("[aria-label='State']")).sendKeys("Karnataka");
+        driver.findElement(By.cssSelector("[aria-label='Pincode']")).sendKeys("560001");
+        driver.findElement(By.cssSelector("[data-testid=confirm-order]")).click();
+        wait.until(ExpectedConditions.visibilityOfElementLocated(By.cssSelector("[data-testid=order-confirmed]")));
+    }`,
+    ),
+    notes: [
+      "The UI test starts on the page under test because the API did the shopping; that is the whole point of hybrid tests.",
+      "Assert the formatted money the customer sees (₹1,077), then the raw number from the API (1077): two layers, one truth.",
+      "Guests can check out, so no account is needed; add a login step only when the scenario is about member features.",
+    ],
+  },
 };

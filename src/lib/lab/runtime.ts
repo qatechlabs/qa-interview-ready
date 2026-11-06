@@ -16,6 +16,8 @@ export interface RunOptions {
   frame: HTMLIFrameElement;
   /** Base URL of the practice app, e.g. /sandbox/swagshop/ */
   base: string;
+  /** Base of the practice app's REST API, e.g. /api/sandbox/swagshop (absent for real sites) */
+  apiBase?: string;
   slowMo: number;
   timeout: number;
   onLog: (e: LogEntry) => void;
@@ -699,8 +701,143 @@ export function createRuntime(opts: RunOptions) {
   const root = new Locator([], "page");
   const mk = (q: Query, d: string) => new Locator([q], d);
 
+  // ----- API requests (Playwright's request fixture / page.request) -----
+  class ApiResponse {
+    constructor(
+      private readonly res: Response,
+      private readonly bodyText: string,
+      private readonly reqUrl: string,
+    ) {}
+    ok() {
+      return this.res.status >= 200 && this.res.status < 300;
+    }
+    status() {
+      return this.res.status;
+    }
+    statusText() {
+      return this.res.statusText;
+    }
+    url() {
+      return this.reqUrl;
+    }
+    headers(): Record<string, string> {
+      const out: Record<string, string> = {};
+      this.res.headers.forEach((v, k) => (out[k] = v));
+      return out;
+    }
+    headersArray() {
+      return Object.entries(this.headers()).map(([name, value]) => ({ name, value }));
+    }
+    async text() {
+      return this.bodyText;
+    }
+    async body() {
+      return new TextEncoder().encode(this.bodyText);
+    }
+    async json() {
+      try {
+        return JSON.parse(this.bodyText);
+      } catch {
+        throw new LabError(`Response from ${this.reqUrl} is not JSON: ${this.bodyText.slice(0, 120)}`);
+      }
+    }
+    async dispose() {}
+    [Symbol.for("lab.response")]() {
+      return true;
+    }
+  }
+  const isApiResponse = (v: unknown): v is ApiResponse => v instanceof ApiResponse;
+
+  interface RequestOptions {
+    data?: unknown;
+    form?: Record<string, string | number | boolean>;
+    multipart?: Record<string, unknown>;
+    headers?: Record<string, string>;
+    params?: Record<string, string | number | boolean> | URLSearchParams | string;
+    failOnStatusCode?: boolean;
+    timeout?: number;
+    method?: string;
+    maxRedirects?: number;
+    ignoreHTTPSErrors?: boolean;
+  }
+
+  function resolveApiUrl(url: string) {
+    const apiBase = opts.apiBase;
+    if (/^https?:\/\//i.test(url)) {
+      const u = new URL(url);
+      if (u.origin !== location.origin) throw new LabError(`API requests only reach the hosted practice app, so ${u.host} is not called. Use a relative path such as request.get('/api/products').`);
+      return u.toString();
+    }
+    if (!apiBase) throw new LabError("This practice site has no REST API in the lab. The request fixture works with SwagShop, PeopleDesk and TrendKart.");
+    const path = url.startsWith("/") ? url : "/" + url;
+    if (path.startsWith("/api/sandbox/")) return new URL(path, location.origin).toString();
+    if (path === "/api" || path.startsWith("/api/")) return new URL(apiBase.replace(/\/$/, "") + path.slice(4), location.origin).toString();
+    throw new LabError(`API paths start with /api, for example request.get('/api${path}'). GET /api lists every endpoint of this practice app.`);
+  }
+
+  function makeRequest(defaults: { headers?: Record<string, string> } = {}) {
+    const extra = { ...(defaults.headers || {}) };
+    const send = async (method: string, url: string, o: RequestOptions = {}) => {
+      await settle();
+      check();
+      const target = new URL(resolveApiUrl(url));
+      if (o.params) {
+        const params = typeof o.params === "string" || o.params instanceof URLSearchParams ? new URLSearchParams(o.params) : new URLSearchParams(Object.entries(o.params).map(([k, v]) => [k, String(v)]));
+        params.forEach((v, k) => target.searchParams.append(k, v));
+      }
+      const headers = new Headers({ ...extra, ...(o.headers || {}) });
+      let body: BodyInit | undefined;
+      if (o.form) {
+        body = new URLSearchParams(Object.entries(o.form).map(([k, v]) => [k, String(v)]));
+      } else if (o.multipart) {
+        const fd = new FormData();
+        for (const [k, v] of Object.entries(o.multipart)) fd.append(k, typeof v === "string" ? v : JSON.stringify(v));
+        body = fd;
+      } else if (o.data !== undefined) {
+        if (typeof o.data === "string") {
+          body = o.data;
+          if (!headers.has("content-type")) headers.set("content-type", "text/plain;charset=UTF-8");
+        } else {
+          body = JSON.stringify(o.data);
+          if (!headers.has("content-type")) headers.set("content-type", "application/json");
+        }
+      }
+      const started = Date.now();
+      const apiPrefix = (opts.apiBase || "").replace(/\/$/, "");
+      const shownPath = (apiPrefix && target.pathname.startsWith(apiPrefix) ? "/api" + target.pathname.slice(apiPrefix.length) : target.pathname) + target.search;
+      let res: Response;
+      try {
+        res = await fetch(target.toString(), { method, headers, body, credentials: "include", redirect: "follow" });
+      } catch (e) {
+        onLog({ kind: "step", text: `${method} ${shownPath} → network error`, ms: Date.now() - started });
+        throw new LabError(`${method} ${shownPath} failed: ${errMsg(e)}`);
+      }
+      const text = await res.text();
+      onLog({ kind: "step", text: `${method} ${shownPath} → ${res.status}`, ms: Date.now() - started });
+      const r = new ApiResponse(res, text, target.toString());
+      if (o.failOnStatusCode && !r.ok()) throw new LabError(`${method} ${shownPath} returned ${res.status}: ${text.slice(0, 200)}`);
+      await sleep(Math.min(opts.slowMo, 150));
+      return r;
+    };
+    const ctx = {
+      get: (url: string, o?: RequestOptions) => send("GET", url, o),
+      post: (url: string, o?: RequestOptions) => send("POST", url, o),
+      put: (url: string, o?: RequestOptions) => send("PUT", url, o),
+      patch: (url: string, o?: RequestOptions) => send("PATCH", url, o),
+      delete: (url: string, o?: RequestOptions) => send("DELETE", url, o),
+      head: (url: string, o?: RequestOptions) => send("HEAD", url, o),
+      fetch: (url: string, o?: RequestOptions) => send((o?.method || "GET").toUpperCase(), url, o),
+      newContext: async (o: { baseURL?: string; extraHTTPHeaders?: Record<string, string> } = {}) => makeRequest({ headers: { ...extra, ...(o.extraHTTPHeaders || {}) } }),
+      storageState: async () => ({ cookies: [], origins: [] }),
+      dispose: async () => undefined,
+    };
+    return ctx;
+  }
+  const request = makeRequest();
+
   // ----- Page -----
   const page = {
+    request,
     async goto(url: string) {
       await settle();
       check();
@@ -865,7 +1002,7 @@ export function createRuntime(opts: RunOptions) {
     const customMsg = typeof message === "string" ? message : undefined;
     const timeout = typeof message === "object" && message?.timeout ? message.timeout : opts.timeout;
     const build = (negate: boolean) => {
-      const label = (m: string, arg?: string) => `expect(${actual instanceof Locator ? actual.description : actual === page ? "page" : fmt(actual)})${negate ? ".not" : ""}.${m}(${arg ?? ""})`;
+      const label = (m: string, arg?: string) => `expect(${actual instanceof Locator ? actual.description : actual === page ? "page" : isApiResponse(actual) ? "response" : fmt(actual)})${negate ? ".not" : ""}.${m}(${arg ?? ""})`;
 
       if (actual instanceof Locator) {
         const loc = actual;
@@ -954,6 +1091,18 @@ export function createRuntime(opts: RunOptions) {
         } as Record<string, AsyncMatcher>;
       }
 
+      if (isApiResponse(actual)) {
+        const r = actual;
+        return {
+          toBeOK: async () => {
+            const ok = r.ok() !== negate;
+            const text = ok ? label("toBeOK") : `${label("toBeOK")} failed. Received: ${r.status()} ${r.statusText()} ${(await r.text()).slice(0, 160)}`;
+            record(ok, "toBeOK", customMsg && !ok ? `${customMsg}: ${text}` : text);
+            if (!ok) throw new LabError(customMsg ? `${customMsg}\n${text}` : text, true);
+          },
+        } as Record<string, AsyncMatcher>;
+      }
+
       // generic (synchronous) matchers
       const sync = (name: string, arg: string, pass: boolean) => {
         const ok = pass !== negate;
@@ -1023,7 +1172,7 @@ export function createRuntime(opts: RunOptions) {
     return p;
   };
 
-  return { page, expect, stats, highlight };
+  return { page, expect, request, makeRequest, stats, highlight };
 }
 
 // ---------- project files and module loading ----------
@@ -1296,7 +1445,7 @@ export async function runProject(input: ProjectFiles, o: ProjectRunOptions): Pro
   }
 
   // ----- fixture resolution -----
-  const BASE_FIXTURES: Record<string, unknown> = { page: rt.page, expect: rt.expect, context: { pages: () => [rt.page], newPage: async () => rt.page, clearCookies: async () => undefined }, browser: {}, browserName: "chromium", baseURL: o.base, request: undefined };
+  const BASE_FIXTURES: Record<string, unknown> = { page: rt.page, expect: rt.expect, context: { pages: () => [rt.page], newPage: async () => rt.page, clearCookies: async () => undefined }, browser: {}, browserName: "chromium", baseURL: o.base, request: rt.request };
 
   async function buildFixtures(defs: FixtureDefs, wanted: string[] | null, teardowns: (() => Promise<void>)[]) {
     const built = new Map<string, unknown>();

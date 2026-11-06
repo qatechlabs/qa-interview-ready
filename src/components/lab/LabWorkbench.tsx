@@ -434,6 +434,7 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
       result = await runProject(files, {
         frame: f,
         base: app.base,
+        apiBase: app.api,
         slowMo: speed,
         timeout: 5000,
         onLog: push,
