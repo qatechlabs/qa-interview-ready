@@ -57,7 +57,7 @@ Run `npm run content` to validate; it fails with a clear message if a section is
 
 1. Import the GitHub repo in Vercel (Framework: Next.js, no special settings).
 2. Add the environment variables from `.env.example`. `ACCESS_TOKEN_SECRET` is required in production.
-3. Add the custom domain (`karthik.qatechlabs.com`) under Settings > Domains and point the DNS record Vercel shows you.
+3. Add the custom domain (`interview.qatechlabs.com`) under Settings > Domains and point the DNS record Vercel shows you.
 
 ## Setting up Razorpay
 
