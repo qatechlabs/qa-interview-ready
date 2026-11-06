@@ -5,6 +5,11 @@ import { cookies } from "next/headers";
 export const ACCESS_COOKIE = "qir_access";
 const MAX_AGE = 60 * 60 * 24 * 365 * 5; // 5 years
 
+/** The shared signing secret for this site's cookies (access and GitHub sign-in). */
+export function cookieSecret() {
+  return secret();
+}
+
 function secret() {
   const s = process.env.ACCESS_TOKEN_SECRET;
   if (!s || s.length < 32) {
