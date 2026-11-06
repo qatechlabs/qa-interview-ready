@@ -59,6 +59,15 @@ const sameFiles = (a: Files, b: Files) => {
   return ka.length === kb.length && ka.every((k) => a[k] === b[k]);
 };
 
+function browserName(): string {
+  if (typeof navigator === "undefined") return "Browser";
+  const ua = navigator.userAgent;
+  const m = /(Edg|OPR|Chrome|Firefox|Safari)\/([\d.]+)/.exec(ua);
+  const name = m ? ({ Edg: "Microsoft Edge", OPR: "Opera", Chrome: "Google Chrome", Firefox: "Firefox", Safari: "Safari" } as Record<string, string>)[m[1]] : "Browser";
+  const os = /Windows/.test(ua) ? "Windows" : /Mac OS/.test(ua) ? "macOS" : /Android/.test(ua) ? "Android" : /Linux/.test(ua) ? "Linux" : /iPhone|iPad/.test(ua) ? "iOS" : "";
+  return `${name}${m ? " " + m[2].split(".")[0] : ""}${os ? " · " + os : ""} · in-browser Playwright runtime`;
+}
+
 export function LabWorkbench({ id, solution, github }: { id: string; solution: SolutionView | null; github?: GitHubState }) {
   const scenario = getScenario(id)!;
   const app = labApp(scenario.app);
@@ -366,6 +375,7 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
           verdict: rows.every((x) => x.ok) ? "pass" : "fail",
           learner: github.user.login,
           baseURL: app.remote ? app.base : SITE.url + app.base,
+          browser: "Chromium (headless) · Playwright Test",
           runUrl: r.runUrl,
           repoUrl: d.repoUrl,
           commitUrl: d.commitUrl,
@@ -465,6 +475,7 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
       verdict: pass ? "pass" : "fail",
       learner: github?.user?.login,
       baseURL: SITE.url + app.base,
+      browser: browserName(),
       repoUrl: github?.user ? `https://github.com/${github.org}/lab-${github.user.login.toLowerCase()}` : undefined,
       log: entries,
     });
