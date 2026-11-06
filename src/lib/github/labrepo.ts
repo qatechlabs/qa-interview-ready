@@ -51,6 +51,37 @@ interface TreeEntry {
   sha?: string | null;
 }
 
+/** Playwright's JSON reporter drops expect() steps, so this tiny reporter records them for the lab checks. */
+export const LAB_REPORTER = `// Records every expect() so the QA Interview Ready labs can grade assertions. Written to assertions.json.
+const fs = require('fs');
+
+class LabReporter {
+  constructor() {
+    this.passed = 0;
+    this.failed = 0;
+    this.matchers = [];
+  }
+
+  onStepEnd(test, result, step) {
+    if (step.category !== 'expect') return;
+    const m = step.title.match(/(?:expect\\.(?:soft\\.|poll\\.)?|Expect ")(\\w+)/);
+    const matcher = m ? m[1] : step.title;
+    if (step.error) this.failed += 1;
+    else this.passed += 1;
+    if (!this.matchers.includes(matcher)) this.matchers.push(matcher);
+  }
+
+  onEnd() {
+    fs.writeFileSync('assertions.json', JSON.stringify({ passed: this.passed, failed: this.failed, matchers: this.matchers }, null, 2));
+  }
+}
+
+module.exports = LabReporter;
+`;
+
+/** Root files the remote runner needs; re-added to older repos before a run. */
+export const RUNNER_FILES = [".github/workflows/lab.yml", "lab-reporter.js", "playwright.config.ts"] as const;
+
 /** The files every lab repo starts with. */
 export function seedFiles(u: GitHubUser, siteUrl: string): Record<string, string> {
   return {
@@ -94,10 +125,11 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
-  reporter: process.env.CI ? [['list'], ['json', { outputFile: 'results.json' }], ['html', { open: 'never' }]] : 'list',
+  reporter: process.env.CI ? [['list'], ['json', { outputFile: 'results.json' }], ['html', { open: 'never' }], ['./lab-reporter.js']] : 'list',
 });
 `,
-    ".gitignore": "node_modules/\ntest-results/\nplaywright-report/\nresults.json\n",
+    ".gitignore": "node_modules/\ntest-results/\nplaywright-report/\nresults.json\nassertions.json\n",
+    "lab-reporter.js": LAB_REPORTER,
     ".github/workflows/lab.yml": `name: Lab run
 
 on:
@@ -137,6 +169,7 @@ jobs:
           name: results
           path: |
             results.json
+            assertions.json
             playwright-report
           retention-days: 7
 `,
