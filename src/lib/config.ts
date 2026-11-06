@@ -11,7 +11,7 @@ export const FREE_PER_LEVEL = Number(process.env.FREE_QUESTIONS_PER_LEVEL || 8);
 
 /** Price in the smallest currency unit (paise for INR). */
 export const PRICE = {
-  amount: Number(process.env.PRICE_AMOUNT || 49900),
+  amount: Number(process.env.PRICE_AMOUNT || 99900),
   currency: process.env.PRICE_CURRENCY || "INR",
   productId: "qir-lifetime",
   label: "Lifetime access",

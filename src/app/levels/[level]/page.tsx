@@ -27,6 +27,7 @@ export default async function LevelPage({ params }: { params: { level: string } 
         <h1 className="mt-2 text-3xl font-bold">{l.name} <span className="text-xl font-normal muted">· {l.years}</span></h1>
         <p className="mt-2 muted">{l.blurb}</p>
         <div className="mt-3 flex flex-wrap gap-2">
+          <Link href={`/mock/${l.id}`} className="btn btn-ghost">🎤 Mock interview</Link>
           <Link href={`/practice/${l.id}`} className="btn btn-ghost">🃏 Flashcard mode</Link>
           <Link href={`/search?level=${l.id}`} className="btn btn-ghost">🔎 Search this level</Link>
         </div>
