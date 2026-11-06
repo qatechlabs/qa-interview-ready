@@ -4,7 +4,7 @@
  */
 import type { ReportModel, ReportStep, ReportTest } from "./report";
 
-export type StepKind = "navigation" | "action" | "assertion" | "step" | "other";
+export type StepKind = "navigation" | "action" | "assertion" | "api" | "step" | "other";
 
 export interface FailureRecord {
   testIndex: number;
@@ -59,6 +59,7 @@ export const fmtMs = (ms?: number) => (ms == null ? "" : ms >= 1000 ? `${(ms / 1
 export function classifyStep(title: string): StepKind {
   const t = title.toLowerCase();
   if (/^step:/.test(t)) return "step";
+  if (/^(get|post|put|patch|delete|head|options)\b/.test(t) && /\s\S*(\/|→|->|\d{3})/.test(t)) return "api";
   if (/^(goto|navigate|page\.goto|open|reload|go ?back|go ?forward)\b/.test(t) || /\bgoto\(/.test(t)) return "navigation";
   if (/^(expect|assert|tobe|tohave|verify|check that|should)/.test(t) || /\bexpect\(/.test(t)) return "assertion";
   if (/^(click|fill|type|press|select|check|uncheck|hover|dblclick|tap|focus|clear|set|upload|drag|wait|scroll|locator|get)/.test(t) || /\.(click|fill|type|press|select|check|uncheck|hover)\(/.test(t)) return "action";
@@ -75,7 +76,7 @@ export function analyse(m: ReportModel): Analysis {
   const passed = m.tests.filter((t) => t.status === "passed").length;
   const failed = total - passed;
   const rate = total ? Math.round((passed / total) * 100) : 0;
-  const byKind: Record<StepKind, number> = { navigation: 0, action: 0, assertion: 0, step: 0, other: 0 };
+  const byKind: Record<StepKind, number> = { navigation: 0, action: 0, assertion: 0, api: 0, step: 0, other: 0 };
   const rows: TestRow[] = [];
   const failures: FailureRecord[] = [];
   const suiteMap = new Map<string, { passed: number; failed: number; durationMs: number }>();

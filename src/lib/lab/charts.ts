@@ -12,10 +12,11 @@ export interface ChartPalette {
   ink: string;
   muted: string;
   accent: string;
+  warn: string;
 }
 
-export const DARK_PALETTE: ChartPalette = { pass: "#7fd3a4", fail: "#f09a93", info: "#93c5fd", track: "#1e2f50", ink: "#efe9e2", muted: "#b9c0ce", accent: "#dbad96" };
-export const PAPER_PALETTE: ChartPalette = { pass: "#1f8a55", fail: "#c0392b", info: "#2d6cdf", track: "#e6e1da", ink: "#101c33", muted: "#5b6577", accent: "#74223a" };
+export const DARK_PALETTE: ChartPalette = { pass: "#7fd3a4", fail: "#f09a93", info: "#93c5fd", track: "#1e2f50", ink: "#efe9e2", muted: "#b9c0ce", accent: "#dbad96", warn: "#e9c46a" };
+export const PAPER_PALETTE: ChartPalette = { pass: "#1f8a55", fail: "#c0392b", info: "#2d6cdf", track: "#e6e1da", ink: "#101c33", muted: "#5b6577", accent: "#74223a", warn: "#9a7b00" };
 
 const esc = (s: unknown) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const FONT = "font-family='system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif'";

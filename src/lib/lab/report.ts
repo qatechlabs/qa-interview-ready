@@ -47,7 +47,7 @@ export interface ReportModel {
 export const esc = (s: unknown) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 /** Chart colours expressed as CSS variables so the print stylesheet can swap the palette. */
-const CSS_PALETTE: ChartPalette = { pass: "var(--pass)", fail: "var(--fail)", info: "var(--info)", track: "var(--line)", ink: "var(--ink)", muted: "var(--muted)", accent: "var(--accent)" };
+const CSS_PALETTE: ChartPalette = { pass: "var(--pass)", fail: "var(--fail)", info: "var(--info)", track: "var(--line)", ink: "var(--ink)", muted: "var(--muted)", accent: "var(--accent)", warn: "var(--warn)" };
 
 /** Shown in the new tab while the run is in progress; the log is streamed into #log. */
 export function placeholderHtml(title: string): string {
@@ -74,6 +74,7 @@ export function buildReportHtml(m: ReportModel): string {
       { label: "Navigation", value: a.byKind.navigation, color: CSS_PALETTE.info },
       { label: "Actions", value: a.byKind.action, color: CSS_PALETTE.accent },
       { label: "Assertions", value: a.byKind.assertion, color: CSS_PALETTE.pass },
+      { label: "API calls", value: a.byKind.api, color: CSS_PALETTE.warn },
       { label: "Other", value: a.byKind.step + a.byKind.other, color: CSS_PALETTE.muted },
     ],
     { title: "Steps by type", centre: String(a.stepsTotal), sub: "steps", palette: CSS_PALETTE },
@@ -249,7 +250,7 @@ const REPORT_CSS = `
 .kv{border-collapse:collapse;width:100%;font-size:13px}.kv th{text-align:left;color:var(--muted);font-weight:600;padding:5px 10px 5px 0;width:190px;vertical-align:top;border-bottom:1px dashed var(--line)}.kv td{padding:5px 0;word-break:break-all;border-bottom:1px dashed var(--line)}.kv tr:last-child th,.kv tr:last-child td{border-bottom:0}.kv a{color:#e8c6b3}
 .tbl{border-collapse:collapse;width:100%;font-size:13px}.tbl th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);padding:8px 10px;border-bottom:1px solid var(--line);background:var(--card2)}.tbl td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}.tbl tbody tr:nth-child(even) td{background:rgba(255,255,255,.02)}.tbl .num{text-align:right;white-space:nowrap}.tbl.compact td,.tbl.compact th{padding:6px 8px}.tbl a{color:var(--ink);text-decoration:none;border-bottom:1px dotted var(--muted)}
 .badge{display:inline-block;border-radius:6px;padding:1px 8px;font-size:11px;font-weight:800;letter-spacing:.05em}.badge.passed{background:#17392a;color:#7fd3a4}.badge.failed{background:#4a1f22;color:#f09a93}.badge.info{background:#1b2a4a;color:#93c5fd}
-.kind{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:0 5px}.kind.assertion{color:var(--pass)}.kind.navigation{color:var(--info)}.kind.action{color:var(--accent)}
+.kind{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:0 5px}.kind.assertion{color:var(--pass)}.kind.navigation{color:var(--info)}.kind.action{color:var(--accent)}.kind.api{color:var(--warn)}
 .errline{font:11px/1.4 ui-monospace,Menlo,Consolas,monospace;color:var(--fail);margin-top:2px}
 .failure{border:1px solid #5a1a2b;border-radius:10px;padding:12px 14px;margin:10px 0;background:#160b12}.failure h3{margin:0 0 8px;font-size:14px}.failure .meta{font-weight:400;color:var(--muted);font-size:12px;margin-left:6px}
 .ok-note{color:var(--pass);font-weight:600}
