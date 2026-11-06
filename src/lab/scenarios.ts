@@ -51,7 +51,10 @@ export type LabState = any;
 export interface CheckContext {
   lab: LabState;
   result: RunResult;
+  /** All project files concatenated, for text checks. */
   code: string;
+  /** Project files by path. Single-file scenarios have one entry, tests/example.spec.ts. */
+  files: Record<string, string>;
   url: string;
   doc: Document | null;
 }
@@ -72,7 +75,10 @@ export interface Scenario {
   story: string;
   criteria: string[];
   hints: string[];
+  /** Starter code for single-file scenarios. */
   starter: string;
+  /** Starter project for multi-file (framework) scenarios; overrides `starter`. */
+  files?: Record<string, string>;
   /** Minimum number of passing assertions the learner's own test must make. */
   minAssertions: number;
   checks: Check[];
@@ -700,7 +706,298 @@ test('filters and sort apply together', async ({ page }) => {
       { label: "You asserted the final total", test: (c) => codeHas(c, /1,077|1077/) },
     ],
   },
+
+  // ---------------- Framework labs (multi-file) ----------------
+  {
+    id: "swagshop-pom-framework",
+    app: "swagshop",
+    title: "Build a Page Object framework from scratch",
+    level: "Mid",
+    minutes: 25,
+    free: true,
+    story:
+      "\"Senior interviewers rarely ask for one test. They hand you an empty folder and say: set up a small framework. Page objects for login and inventory, a fixture that logs in, and tests that read like English. Build that for SwagShop.\"",
+    criteria: [
+      "pages/login.page.ts exports a LoginPage class with goto() and login(username, password).",
+      "pages/inventory.page.ts exports an InventoryPage class with addToCart(productName), cartCount(), sortBy(value) and prices().",
+      "fixtures.ts extends test with an inventory fixture that logs in as standard_user and hands the test an InventoryPage.",
+      "tests/checkout.spec.ts has two tests that use only the fixture and page objects, no page.getBy... or page.locator in the spec: the badge shows 2 after adding two items, and prices ascend after sorting low to high.",
+    ],
+    hints: [
+      "A page object wraps locators in methods: async login(u, p) { await this.page.getByPlaceholder('Username').fill(u); ... }",
+      "In fixtures.ts: export const test = base.extend<{ inventory: InventoryPage }>({ inventory: async ({ page }, use) => { ...log in...; await use(new InventoryPage(page)); } });",
+      "The spec imports test and expect from '../fixtures' instead of '@playwright/test'.",
+      "Click the file names on the left to switch files. Add more with + New file.",
+    ],
+    starter: "",
+    files: {
+      "tests/checkout.spec.ts": `import { test, expect } from '../fixtures';
+
+test('badge shows the number of items in the cart', async ({ inventory }) => {
+  // TODO: add Trail Runner Backpack and Night Ride Bike Light, then assert cartCount() is 2
+});
+
+test('products sort by price low to high', async ({ inventory }) => {
+  // TODO: sortBy('lohi'), read prices(), assert they are ascending
+});
+`,
+      "fixtures.ts": `import { test as base } from '@playwright/test';
+import { LoginPage } from './pages/login.page';
+import { InventoryPage } from './pages/inventory.page';
+
+// Fixtures are set up before each test and handed to it by name.
+export const test = base.extend<{ inventory: InventoryPage }>({
+  inventory: async ({ page }, use) => {
+    // TODO: use LoginPage to log in as standard_user / secret_sauce
+    await use(new InventoryPage(page));
+  },
+});
+
+export { expect } from '@playwright/test';
+`,
+      "pages/login.page.ts": `import type { Page } from '@playwright/test';
+
+export class LoginPage {
+  constructor(private readonly page: Page) {}
+
+  async goto() {
+    await this.page.goto('/');
+  }
+
+  async login(username: string, password: string) {
+    // TODO
+  }
+}
+`,
+      "pages/inventory.page.ts": `import type { Page } from '@playwright/test';
+
+export class InventoryPage {
+  constructor(private readonly page: Page) {}
+
+  async addToCart(productName: string) {
+    // TODO: scope the "Add to cart" button to the product card
+  }
+
+  async cartCount(): Promise<number> {
+    // TODO: read the badge (0 when there is no badge)
+    return 0;
+  }
+
+  async sortBy(value: 'az' | 'za' | 'lohi' | 'hilo') {
+    // TODO
+  }
+
+  async prices(): Promise<number[]> {
+    // TODO: every price on the page as a number
+    return [];
+  }
+}
+`,
+    },
+    minAssertions: 2,
+    skills: ["Page Objects", "Custom fixtures", "Multi-file project"],
+    checks: [
+      { label: "Project has page objects in pages/", test: (c) => Object.keys(c.files).filter((f) => f.startsWith("pages/")).length >= 2 && Object.entries(c.files).some(([f, src]) => f.startsWith("pages/") && /export\s+class\s+/.test(src)) },
+      { label: "fixtures.ts extends test with an inventory fixture", test: (c) => /\.extend\s*(<[^>]*>)?\s*\(/.test(c.files["fixtures.ts"] || "") && /inventory\s*:/.test(c.files["fixtures.ts"] || "") },
+      { label: "The spec imports test from the fixtures file", test: (c) => Object.entries(c.files).some(([f, src]) => f.startsWith("tests/") && /from\s+['"][^'"]*fixtures['"]/.test(src)) },
+      { label: "No raw locators in the spec (page.getBy..., page.locator)", test: (c) => Object.entries(c.files).filter(([f]) => f.startsWith("tests/")).every(([, src]) => !/page\s*\.\s*(getBy\w+|locator|click|fill|\$\$?)\s*\(/.test(src)) },
+      { label: "Both tests ran and passed", test: (c) => c.result.tests.length >= 2 && c.result.tests.every((t) => t.ok) },
+      { label: "You asserted the badge count and the sorted prices", test: (c) => usesAny(c, "toBe", "toEqual") && c.result.assertions.passed >= 2 },
+    ],
+  },
+  {
+    id: "peopledesk-fixture-teardown",
+    app: "peopledesk",
+    title: "A fixture that creates test data and cleans up",
+    level: "Senior",
+    minutes: 25,
+    free: false,
+    story:
+      "\"Every test that needs an employee should get a fresh one, and the suite must leave the system exactly as it found it. Design the fixtures for that, then write the search test on top of them.\"",
+    criteria: [
+      "fixtures.ts: an adminPage fixture that logs in as Admin and hands over the page, and an employee fixture that depends on it.",
+      "The employee fixture creates an employee with a unique first name through PIM → Add, hands { first, last, id } to the test with use(), and after the test deletes that employee again (Delete → Yes, Delete).",
+      "tests/employee-search.spec.ts: search by the employee's first name and assert (1) Record Found and that the row shows the name.",
+      "After the run the employee list must be back to 6 records, which is how we know the teardown worked.",
+    ],
+    hints: [
+      "Code after `await use(value)` in a fixture is the teardown. It runs even if the test fails.",
+      "Fixtures can depend on fixtures: employee: async ({ adminPage }, use) => { ... }.",
+      "The id is prefilled on the Add form: read it with inputValue() before saving.",
+      "To find the delete button: page.getByRole('button', { name: `Delete ${first} ${last}` }).",
+    ],
+    starter: "",
+    files: {
+      "tests/employee-search.spec.ts": `import { test, expect } from '../fixtures';
+
+test('a new employee can be found by name', async ({ adminPage, employee }) => {
+  // TODO: go to PIM, search by employee.first, assert one record with the name
+});
+`,
+      "fixtures.ts": `import { test as base, type Page } from '@playwright/test';
+import { LoginPage } from './pages/login.page';
+import { EmployeesPage } from './pages/employees.page';
+
+export interface Employee {
+  first: string;
+  last: string;
+  id: string;
+}
+
+export const test = base.extend<{ adminPage: Page; employee: Employee }>({
+  adminPage: async ({ page }, use) => {
+    // TODO: log in as Admin / admin123, then await use(page)
+  },
+
+  employee: async ({ adminPage }, use) => {
+    const first = \`Auto\${Date.now()}\`;
+    const last = 'Fixture';
+    // TODO: create the employee, hand it over with use(), then delete it in the teardown
+  },
+});
+
+export { expect } from '@playwright/test';
+`,
+      "pages/login.page.ts": `import type { Page } from '@playwright/test';
+
+export class LoginPage {
+  constructor(private readonly page: Page) {}
+
+  async login(username: string, password: string) {
+    await this.page.goto('/');
+    await this.page.getByLabel('Username').fill(username);
+    await this.page.getByLabel('Password').fill(password);
+    await this.page.getByRole('button', { name: 'Login' }).click();
+  }
+}
+`,
+      "pages/employees.page.ts": `import type { Page } from '@playwright/test';
+
+export class EmployeesPage {
+  constructor(private readonly page: Page) {}
+
+  async open() {
+    await this.page.getByRole('link', { name: 'PIM' }).click();
+  }
+
+  async add(first: string, last: string): Promise<string> {
+    // TODO: click + Add, fill the names, read the prefilled id, Save, return the id
+    return '';
+  }
+
+  async search(name: string) {
+    // TODO
+  }
+
+  async delete(first: string, last: string) {
+    // TODO: Delete button for that person, then "Yes, Delete"
+  }
+}
+`,
+    },
+    minAssertions: 2,
+    skills: ["Fixture teardown", "Fixture dependencies", "Test data hygiene"],
+    checks: [
+      { label: "The employee fixture depends on adminPage", test: (c) => /employee\s*:\s*async\s*\(\s*\{[^}]*adminPage/.test(c.files["fixtures.ts"] || "") },
+      { label: "The fixture has teardown code after use()", test: (c) => /await\s+use\([^)]*\)\s*;?[\s\S]*?(delete|Delete)/.test(c.files["fixtures.ts"] || "") },
+      { label: "The test passed", test: (c) => c.result.tests.length >= 1 && c.result.tests.every((t) => t.ok) },
+      { label: "You asserted the search result", test: (c) => usesAny(c, "toHaveText", "toContainText", "toHaveCount") },
+      { label: "Teardown restored the list to 6 employees", test: (c) => Array.isArray(c.lab?.employees) && c.lab.employees.length === 6 },
+    ],
+  },
+  {
+    id: "trendkart-data-driven",
+    app: "trendkart",
+    title: "Data-driven suite with a helper module",
+    level: "Senior",
+    minutes: 25,
+    free: false,
+    story:
+      "\"We have 40 search terms to cover and I don't want 40 copies of the same test. Show me a data-driven design: a data file, a helper for prices, a page object, and a spec that generates a test per row.\"",
+    criteria: [
+      "data/searches.ts exports SEARCHES: at least three rows of { query, expectedCount, mustContain } (shirt → 5 results all containing Shirt, jeans → 2, kurta → 2).",
+      "helpers/money.ts exports parsePrice('₹1,199') that returns 1199.",
+      "pages/search.page.ts: SearchPage with search(query), resultCount(), productNames() and prices().",
+      "tests/search.spec.ts generates one test per row with a loop, asserting the count and that every name contains mustContain, plus one test that sorts by Price: Low to High and uses parsePrice to assert the prices ascend.",
+    ],
+    hints: [
+      "A loop at file level registers tests: for (const row of SEARCHES) { test(`search ${row.query}`, async ({ page }) => { ... }); }",
+      "The results count has data-testid=\"results-count\" and reads \"- 5 items\".",
+      "Sorting: page.getByLabel('Sort by').selectOption('price_asc'). Results reload, so wait on an assertion before reading prices.",
+      "No raw locators in the spec: put them all in SearchPage.",
+    ],
+    starter: "",
+    files: {
+      "tests/search.spec.ts": `import { test, expect } from '@playwright/test';
+import { SEARCHES } from '../data/searches';
+import { parsePrice } from '../helpers/money';
+import { SearchPage } from '../pages/search.page';
+
+// TODO: one test per row in SEARCHES
+
+test('results sort by price low to high', async ({ page }) => {
+  // TODO
+});
+`,
+      "data/searches.ts": `export interface SearchCase {
+  query: string;
+  expectedCount: number;
+  mustContain: string;
+}
+
+export const SEARCHES: SearchCase[] = [
+  // TODO: shirt, jeans, kurta
 ];
+`,
+      "helpers/money.ts": `/** "₹1,199" → 1199 */
+export function parsePrice(text: string): number {
+  // TODO
+  return 0;
+}
+`,
+      "pages/search.page.ts": `import type { Page } from '@playwright/test';
+
+export class SearchPage {
+  constructor(private readonly page: Page) {}
+
+  async search(query: string) {
+    // TODO: fill the search box and press Enter
+  }
+
+  async resultCount(): Promise<number> {
+    // TODO: parse "- 5 items"
+    return 0;
+  }
+
+  async productNames(): Promise<string[]> {
+    return [];
+  }
+
+  async prices(): Promise<string[]> {
+    return [];
+  }
+
+  async sortBy(value: 'price_asc' | 'price_desc' | 'rating' | 'discount') {
+    // TODO
+  }
+}
+`,
+    },
+    minAssertions: 4,
+    skills: ["Data-driven tests", "Helper modules", "Generated tests"],
+    checks: [
+      { label: "At least four tests ran and passed", test: (c) => c.result.tests.length >= 4 && c.result.tests.every((t) => t.ok) },
+      { label: "The spec generates tests from SEARCHES in a loop", test: (c) => Object.entries(c.files).some(([f, src]) => f.startsWith("tests/") && /SEARCHES/.test(src) && /(for\s*\(|\.forEach\s*\(|\.map\s*\()/.test(src)) },
+      { label: "The data file has at least three rows", test: (c) => ((c.files["data/searches.ts"] || "").match(/query\s*:/g) || []).length >= 3 },
+      { label: "parsePrice is implemented and used", test: (c) => /return\s+(?!0;)/.test(c.files["helpers/money.ts"] || "") && Object.entries(c.files).some(([f, src]) => f.startsWith("tests/") && /parsePrice\b/.test(src)) },
+      { label: "No raw locators in the spec", test: (c) => Object.entries(c.files).filter(([f]) => f.startsWith("tests/")).every(([, src]) => !/page\s*\.\s*(getBy\w+|locator|click|fill)\s*\(/.test(src)) },
+    ],
+  },
+];
+
+export const MAIN_FILE = "tests/example.spec.ts";
+export const starterFiles = (s: Scenario): Record<string, string> => (s.files ? { ...s.files } : { [MAIN_FILE]: s.starter });
+export const isFramework = (s: Scenario) => !!s.files;
 
 export const getScenario = (id: string) => SCENARIOS.find((s) => s.id === id);
 export const scenariosFor = (app: LabAppId) => SCENARIOS.filter((s) => s.app === app);

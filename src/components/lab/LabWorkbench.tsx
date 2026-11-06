@@ -1,11 +1,12 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { getScenario, labApp } from "@/lab/scenarios";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getScenario, isFramework, labApp, MAIN_FILE, starterFiles } from "@/lab/scenarios";
 import type { LogEntry, RunResult } from "@/lib/lab/runtime";
 import { markLabPassed } from "@/lib/lab/progress";
 
 interface SolutionView {
   playwright: string;
+  files?: Record<string, string>;
   selenium: string;
   notes: string[];
 }
@@ -15,6 +16,8 @@ interface CheckRow {
   ok: boolean;
 }
 
+type Files = Record<string, string>;
+
 const SPEEDS = [
   { label: "Fast", ms: 0 },
   { label: "Normal", ms: 250 },
@@ -22,11 +25,24 @@ const SPEEDS = [
 ];
 
 const draftKey = (id: string) => `qir_lab_draft_${id}`;
+const sortPaths = (files: Files) =>
+  Object.keys(files).sort((a, b) => {
+    const da = a.includes("/") ? 0 : 1;
+    const db = b.includes("/") ? 0 : 1;
+    return da - db || a.localeCompare(b);
+  });
+const sameFiles = (a: Files, b: Files) => {
+  const ka = Object.keys(a), kb = Object.keys(b);
+  return ka.length === kb.length && ka.every((k) => a[k] === b[k]);
+};
 
 export function LabWorkbench({ id, solution }: { id: string; solution: SolutionView | null }) {
   const scenario = getScenario(id)!;
   const app = labApp(scenario.app);
-  const [code, setCode] = useState(scenario.starter);
+  const framework = isFramework(scenario);
+  const starter = useMemo(() => starterFiles(scenario), [scenario]);
+  const [files, setFiles] = useState<Files>(starter);
+  const [active, setActive] = useState<string>(() => sortPaths(starter).find((p) => p.startsWith("tests/")) || sortPaths(starter)[0]);
   const [running, setRunning] = useState(false);
   const [log, setLog] = useState<LogEntry[]>([]);
   const [checks, setChecks] = useState<CheckRow[] | null>(null);
@@ -39,11 +55,21 @@ export function LabWorkbench({ id, solution }: { id: string; solution: SolutionV
   const signal = useRef({ aborted: false });
   const gutter = useRef<HTMLDivElement>(null);
   const logEnd = useRef<HTMLDivElement>(null);
+  const editor = useRef<HTMLTextAreaElement>(null);
+
+  const code = files[active] ?? "";
+  const setCode = (next: string) => setFiles((f) => ({ ...f, [active]: next }));
+  const paths = sortPaths(files);
 
   useEffect(() => {
     try {
       const saved = localStorage.getItem(draftKey(id));
-      if (saved) setCode(saved);
+      if (!saved) return;
+      const parsed = saved.startsWith("{") ? (JSON.parse(saved) as { files?: Files; active?: string }) : { files: { [MAIN_FILE]: saved } };
+      if (parsed.files && Object.keys(parsed.files).length) {
+        setFiles(parsed.files);
+        if (parsed.active && parsed.active in parsed.files) setActive(parsed.active);
+      }
     } catch {
       /* ignore */
     }
@@ -52,14 +78,14 @@ export function LabWorkbench({ id, solution }: { id: string; solution: SolutionV
   useEffect(() => {
     const t = setTimeout(() => {
       try {
-        if (code === scenario.starter) localStorage.removeItem(draftKey(id));
-        else localStorage.setItem(draftKey(id), code);
+        if (sameFiles(files, starter)) localStorage.removeItem(draftKey(id));
+        else localStorage.setItem(draftKey(id), JSON.stringify({ files, active }));
       } catch {
         /* ignore */
       }
     }, 400);
     return () => clearTimeout(t);
-  }, [code, id, scenario.starter]);
+  }, [files, active, id, starter]);
 
   useEffect(() => {
     logEnd.current?.scrollIntoView({ block: "nearest" });
@@ -116,10 +142,10 @@ export function LabWorkbench({ id, solution }: { id: string; solution: SolutionV
     };
     setLog([]);
     signal.current = { aborted: false };
-    const { runCode } = await import("@/lib/lab/runtime");
+    const { runProject } = await import("@/lib/lab/runtime");
     let result: RunResult;
     try {
-      result = await runCode(code, {
+      result = await runProject(files, {
         frame: f,
         base: app.base,
         slowMo: speed,
@@ -147,9 +173,10 @@ export function LabWorkbench({ id, solution }: { id: string; solution: SolutionV
     } catch {
       /* ignore */
     }
-    const ctx = { lab, result, code, url: pageUrl, doc: f.contentDocument };
+    const allCode = Object.values(files).join("\n");
+    const ctx = { lab, result, code: allCode, files, url: pageUrl, doc: f.contentDocument };
     const rows: CheckRow[] = [
-      { label: "Your test ran without errors", ok: result.ok },
+      { label: "Your tests ran without errors", ok: result.ok },
       { label: `At least ${scenario.minAssertions} passing assertion${scenario.minAssertions === 1 ? "" : "s"}`, ok: result.assertions.passed >= scenario.minAssertions },
       ...scenario.checks.map((c) => {
         let ok = false;
@@ -166,11 +193,11 @@ export function LabWorkbench({ id, solution }: { id: string; solution: SolutionV
     setVerdict(pass ? "pass" : "fail");
     push({
       kind: pass ? "pass" : "info",
-      text: `${result.assertions.passed} assertion${result.assertions.passed === 1 ? "" : "s"} passed, ${result.assertions.failed} failed · ${(result.durationMs / 1000).toFixed(1)}s`,
+      text: `${result.tests.filter((t) => t.ok).length}/${result.tests.length} tests passed · ${result.assertions.passed} assertion${result.assertions.passed === 1 ? "" : "s"} passed, ${result.assertions.failed} failed · ${(result.durationMs / 1000).toFixed(1)}s`,
     });
     if (pass) markLabPassed(id);
     setRunning(false);
-  }, [running, code, app.base, speed, freshPage, scenario, id]);
+  }, [running, files, app.base, speed, freshPage, scenario, id]);
 
   const stop = () => {
     signal.current.aborted = true;
@@ -209,18 +236,78 @@ export function LabWorkbench({ id, solution }: { id: string; solution: SolutionV
   };
 
   const lines = code.split("\n").length;
+  const dirty = !sameFiles(files, starter);
   const resetCode = () => {
-    if (code !== scenario.starter && !confirm("Replace your code with the starter template?")) return;
-    setCode(scenario.starter);
+    if (dirty && !confirm("Replace all files with the starter template?")) return;
+    setFiles(starter);
+    setActive(sortPaths(starter).find((p) => p.startsWith("tests/")) || sortPaths(starter)[0]);
   };
   const loadSolution = () => {
     if (!solution) return;
-    if (code !== scenario.starter && !confirm("Replace your code with the reference solution?")) return;
-    setCode(solution.playwright);
+    if (dirty && !confirm("Replace your code with the reference solution?")) return;
+    const next = solution.files ? { ...solution.files } : { [MAIN_FILE]: solution.playwright };
+    setFiles(next);
+    setActive(sortPaths(next).find((p) => p.startsWith("tests/")) || sortPaths(next)[0]);
   };
   const resetApp = async () => {
     clearAppState();
     if (frame.current) frame.current.src = app.base + "?nav=" + Date.now();
+  };
+  const newFile = () => {
+    const name = prompt("New file path (for example pages/cart.page.ts)", "pages/");
+    if (!name) return;
+    const path = name.trim().replace(/^\/+/, "");
+    if (!/^[\w.-]+(\/[\w.-]+)*\.(ts|js|json)$/.test(path)) {
+      alert("Use a path like pages/cart.page.ts (letters, numbers, dots, dashes, folders).");
+      return;
+    }
+    if (path in files) {
+      setActive(path);
+      return;
+    }
+    setFiles((f) => ({ ...f, [path]: "" }));
+    setActive(path);
+    requestAnimationFrame(() => editor.current?.focus());
+  };
+  const renameFile = () => {
+    const name = prompt("Rename file", active);
+    if (!name || name === active) return;
+    const path = name.trim().replace(/^\/+/, "");
+    if (path in files) {
+      alert("A file with that name already exists.");
+      return;
+    }
+    setFiles((f) => {
+      const next: Files = {};
+      for (const [k, v] of Object.entries(f)) next[k === active ? path : k] = v;
+      return next;
+    });
+    setActive(path);
+  };
+  const deleteFile = () => {
+    if (paths.length <= 1) return;
+    if (!confirm(`Delete ${active}?`)) return;
+    setFiles((f) => {
+      const next = { ...f };
+      delete next[active];
+      return next;
+    });
+    setActive(paths.find((p) => p !== active)!);
+  };
+  const download = async () => {
+    const { makeZip, projectFiles } = await import("@/lib/lab/zip");
+    const origin = typeof location !== "undefined" ? location.origin : "https://interview.qatechlabs.com";
+    const project = projectFiles(framework ? files : { [MAIN_FILE]: files[MAIN_FILE] ?? Object.values(files)[0] }, {
+      name: `qa-lab-${scenario.id}`,
+      baseURL: origin + app.base,
+      title: scenario.title,
+    });
+    const blob = makeZip(project);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${scenario.id}.zip`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   };
 
   return (
@@ -251,7 +338,7 @@ export function LabWorkbench({ id, solution }: { id: string; solution: SolutionV
 
           <section className="overflow-hidden rounded-xl border" style={{ borderColor: "var(--border)" }}>
             <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
-              <span className="text-xs font-semibold">example.spec.ts</span>
+              <span className="truncate text-xs font-semibold" title={active}>{active}</span>
               <span className="chip">Playwright · TypeScript</span>
               <div className="ml-auto flex items-center gap-1.5">
                 <label className="sr-only" htmlFor="lab-speed">Speed</label>
@@ -260,43 +347,79 @@ export function LabWorkbench({ id, solution }: { id: string; solution: SolutionV
                     <option key={s.ms} value={s.ms}>{s.label}</option>
                   ))}
                 </select>
-                <button onClick={resetCode} className="btn btn-ghost !px-2.5 !py-1 text-xs" disabled={running}>Reset code</button>
+                <button onClick={resetCode} className="btn btn-ghost !px-2.5 !py-1 text-xs" disabled={running}>Reset</button>
                 {running ? (
                   <button onClick={stop} className="btn !px-3 !py-1 text-xs" style={{ background: "#e11d48", color: "#fff" }}>■ Stop</button>
                 ) : (
-                  <button onClick={run} className="btn btn-primary !px-3 !py-1 text-xs" title="Ctrl/⌘ + Enter">▶ Run test</button>
+                  <button onClick={run} className="btn btn-primary !px-3 !py-1 text-xs" title="Ctrl/⌘ + Enter">▶ Run tests</button>
                 )}
               </div>
             </div>
-            <div className="relative flex h-[320px] overflow-hidden font-mono text-[13px] leading-[1.6] sm:h-[460px]" style={{ background: "var(--surface-2)" }}>
-              <div ref={gutter} aria-hidden className="h-full select-none overflow-hidden py-3 pl-3 pr-2 text-right muted" style={{ minWidth: "2.75rem" }}>
-                {Array.from({ length: lines }, (_, i) => (
-                  <div key={i}>{i + 1}</div>
-                ))}
+            <div className="flex flex-col sm:flex-row">
+              {(framework || paths.length > 1) && (
+                <aside className="flex shrink-0 flex-col border-b sm:w-44 sm:border-b-0 sm:border-r" style={{ borderColor: "var(--border)", background: "var(--surface)" }} aria-label="Project files">
+                  <div className="flex items-center justify-between px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wide muted">
+                    <span>Files</span>
+                    <button onClick={newFile} className="rounded px-1.5 py-0.5 text-xs font-semibold normal-case accent hover:underline" disabled={running}>+ New</button>
+                  </div>
+                  <ul className="flex gap-1 overflow-x-auto px-2 pb-2 text-xs sm:block sm:space-y-0.5 sm:overflow-visible sm:pb-1">
+                    {paths.map((p) => {
+                      const dir = p.includes("/") ? p.slice(0, p.lastIndexOf("/") + 1) : "";
+                      const name = p.slice(dir.length);
+                      return (
+                        <li key={p}>
+                          <button
+                            onClick={() => setActive(p)}
+                            className="w-full whitespace-nowrap rounded px-2 py-1 text-left font-mono"
+                            style={p === active ? { background: "var(--accent-soft)", color: "var(--accent)" } : undefined}
+                            aria-current={p === active ? "true" : undefined}
+                          >
+                            <span className="muted">{dir}</span>
+                            {name}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <div className="mt-auto hidden gap-2 px-2 py-1.5 text-[11px] sm:flex">
+                    <button onClick={renameFile} className="accent hover:underline" disabled={running}>Rename</button>
+                    <button onClick={deleteFile} className="hover:underline" style={{ color: "#e11d48" }} disabled={running || paths.length <= 1}>Delete</button>
+                  </div>
+                </aside>
+              )}
+              <div className="relative flex h-[320px] min-w-0 flex-1 overflow-hidden font-mono text-[13px] leading-[1.6] sm:h-[460px]" style={{ background: "var(--surface-2)" }}>
+                <div ref={gutter} aria-hidden className="h-full select-none overflow-hidden py-3 pl-3 pr-2 text-right muted" style={{ minWidth: "2.75rem" }}>
+                  {Array.from({ length: lines }, (_, i) => (
+                    <div key={i}>{i + 1}</div>
+                  ))}
+                </div>
+                <textarea
+                  ref={editor}
+                  aria-label={`Code editor: ${active}`}
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  onKeyDown={onKeyDown}
+                  onScroll={(e) => {
+                    if (gutter.current) gutter.current.scrollTop = e.currentTarget.scrollTop;
+                  }}
+                  spellCheck={false}
+                  autoCapitalize="off"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  wrap="off"
+                  className="block h-full w-full resize-none overflow-auto bg-transparent py-3 pr-3 outline-none"
+                  style={{ color: "var(--text)", tabSize: 2 }}
+                />
               </div>
-              <textarea
-                aria-label="Test code editor"
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                onKeyDown={onKeyDown}
-                onScroll={(e) => {
-                  if (gutter.current) gutter.current.scrollTop = e.currentTarget.scrollTop;
-                }}
-                spellCheck={false}
-                autoCapitalize="off"
-                autoComplete="off"
-                autoCorrect="off"
-                wrap="off"
-                className="block h-[320px] w-full resize-none overflow-auto bg-transparent py-3 pr-3 outline-none sm:h-[460px]"
-                style={{ color: "var(--text)", tabSize: 2 }}
-              />
             </div>
           </section>
-          <p className="text-xs muted">
-            Runs in your browser with a Playwright-compatible API: <code className="inline-code">page.goto</code>, <code className="inline-code">getByRole</code>,{" "}
-            <code className="inline-code">getByLabel</code>, <code className="inline-code">getByTestId</code>, <code className="inline-code">locator</code>, actions with auto-waiting and{" "}
-            <code className="inline-code">expect</code> web-first assertions. Your code is saved in this browser. Ctrl/⌘ + Enter runs it.
-          </p>
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs muted">
+            <p>
+              Runs in your browser with a Playwright-compatible API: locators, auto-waiting actions, <code className="inline-code">expect</code>, imports between files and{" "}
+              <code className="inline-code">test.extend</code> fixtures. Saved in this browser. Ctrl/⌘ + Enter runs.
+            </p>
+            <button onClick={download} className="btn btn-ghost !px-2.5 !py-1 text-xs">⬇ Download as Playwright project</button>
+          </div>
         </div>
 
         {/* Right: live preview and results */}
@@ -325,13 +448,13 @@ export function LabWorkbench({ id, solution }: { id: string; solution: SolutionV
               {verdict === "fail" && <span className="chip" style={{ color: "#e11d48" }}>✗ Not yet</span>}
             </div>
             <div className="max-h-56 overflow-auto rounded-lg p-2 font-mono text-[12px] leading-relaxed" style={{ background: "var(--surface-2)" }}>
-              {!log.length && <p className="muted">Press Run test to watch your code drive the practice app in the preview.</p>}
+              {!log.length && <p className="muted">Press Run tests to watch your code drive the practice app in the preview.</p>}
               {log.map((e, i) => (
                 <div key={i} className="flex gap-2 whitespace-pre-wrap break-words">
                   <span aria-hidden style={{ color: e.kind === "pass" ? "var(--good)" : e.kind === "fail" || e.kind === "error" ? "#e11d48" : "var(--muted)" }}>
                     {e.kind === "pass" ? "✓" : e.kind === "fail" || e.kind === "error" ? "✗" : e.kind === "test" ? "▸" : e.kind === "step" ? "·" : "i"}
                   </span>
-                  <span className={e.kind === "test" ? "font-semibold" : e.kind === "error" ? "" : ""} style={e.kind === "error" ? { color: "#e11d48" } : undefined}>
+                  <span className={e.kind === "test" ? "font-semibold" : ""} style={e.kind === "error" ? { color: "#e11d48" } : undefined}>
                     {e.text}
                     {e.ms !== undefined && e.ms > 20 && <span className="muted"> {e.ms}ms</span>}
                   </span>
@@ -361,7 +484,7 @@ export function LabWorkbench({ id, solution }: { id: string; solution: SolutionV
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 className="font-semibold">Reference solution</h2>
-            <p className="text-sm muted">Try it yourself first. Then compare with the Playwright solution and the same test in Selenium Java with TestNG.</p>
+            <p className="text-sm muted">Try it yourself first. Then compare with the Playwright solution and the same {framework ? "framework" : "test"} in Selenium Java with TestNG.</p>
           </div>
           {solution && (
             <div className="flex gap-1.5">

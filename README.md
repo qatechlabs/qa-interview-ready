@@ -93,5 +93,6 @@ To change the price, update `PRICE_AMOUNT` (in paise). To change how many questi
 `/labs` hosts scenario-based coding rounds. Learners write Playwright-style TypeScript in the browser and watch it drive a practice app in an iframe.
 
 - Practice apps (static, same origin): `public/sandbox/{swagshop,peopledesk,trendkart}/index.html`, served at `/sandbox/<app>` via a rewrite in `next.config.mjs`. Each app keeps state in `sessionStorage` under `lab:<app>:` and exposes it on `window.__lab` for scenario checks.
-- Runtime: `src/lib/lab/runtime.ts` implements a Playwright-compatible subset (locators, auto-waiting actions, web-first `expect`, `test`/`describe`/`beforeEach`/`step`). TypeScript is stripped with sucrase.
+- Runtime: `src/lib/lab/runtime.ts` implements a Playwright-compatible subset (locators, auto-waiting actions, web-first `expect`, `test`/`describe`/`beforeEach`/`step`, `test.extend` fixtures with teardown). `runProject()` takes a map of files, resolves relative imports between them (sucrase compiles TypeScript to CommonJS in the browser) and runs every `*.spec.ts`.
+- Framework scenarios set `files` instead of `starter` to give the learner a multi-file project. The workbench lets them add, rename and delete files, and `src/lib/lab/zip.ts` downloads the project as a runnable Playwright repo.
 - Scenarios and checks: `src/lab/scenarios.ts`. Reference solutions (Playwright + Selenium Java) are server-only in `src/lab/solutions.ts` and only sent for free scenarios or to full-access users.

@@ -1010,93 +1010,361 @@ export function createRuntime(opts: RunOptions) {
   return { page, expect, stats, highlight };
 }
 
-// ---------- code preparation ----------
+// ---------- project files and module loading ----------
 
-export function stripModuleSyntax(code: string) {
-  return code
-    .replace(/^\s*import\s+[\s\S]*?from\s+['"][^'"]+['"];?/gm, "")
-    .replace(/^\s*import\s+['"][^'"]+['"];?/gm, "")
-    .replace(/^\s*const\s+\{[^}]*\}\s*=\s*require\(['"][^'"]+['"]\);?/gm, "")
-    .replace(/^\s*export\s+default\s+/gm, "")
-    .replace(/^\s*export\s+(?=(async\s+)?(function|class|const|let|var)\b)/gm, "");
+/** A virtual project: path (e.g. "tests/login.spec.ts") to source. */
+export type ProjectFiles = Record<string, string>;
+
+export const SPEC_RE = /\.(spec|test)\.[cm]?[jt]sx?$/;
+const CONFIG_RE = /(^|\/)playwright\.config\.[cm]?[jt]s$/;
+
+export function normalizePath(p: string) {
+  const parts: string[] = [];
+  for (const seg of p.replace(/\\/g, "/").split("/")) {
+    if (!seg || seg === ".") continue;
+    if (seg === "..") parts.pop();
+    else parts.push(seg);
+  }
+  return parts.join("/");
 }
 
-export async function compile(code: string): Promise<string> {
-  const { transform } = await import("sucrase");
-  const src = stripModuleSyntax(code);
+function dirname(p: string) {
+  const i = p.lastIndexOf("/");
+  return i < 0 ? "" : p.slice(0, i);
+}
+
+export function resolveModule(files: ProjectFiles, from: string, spec: string): string | null {
+  let base: string;
+  if (spec.startsWith(".")) base = normalizePath(dirname(from) + "/" + spec);
+  else if (spec.startsWith("/")) base = normalizePath(spec);
+  else if (spec.startsWith("@/") || spec.startsWith("~/")) base = normalizePath(spec.slice(2));
+  else base = normalizePath(spec); // bare path such as "pages/login.page"
+  const candidates = [base, `${base}.ts`, `${base}.tsx`, `${base}.js`, `${base}.mjs`, `${base}/index.ts`, `${base}/index.js`];
+  for (const c of candidates) if (c in files) return c;
+  return null;
+}
+
+type Sucrase = typeof import("sucrase");
+let sucrase: Promise<Sucrase> | null = null;
+const loadSucrase = () => (sucrase ||= import("sucrase"));
+
+function compileFile(s: Sucrase, code: string, file: string) {
   try {
-    return transform(src, { transforms: ["typescript"], disableESTransforms: true }).code;
+    return s.transform(code, { transforms: ["typescript", "imports"], disableESTransforms: true, filePath: file, preserveDynamicImport: true }).code;
   } catch (e) {
     const err = e as Error & { loc?: { line: number; column: number } };
-    throw new LabError(`Syntax error${err.loc ? ` on line ${err.loc.line}` : ""}: ${err.message.replace(/\s*\(\d+:\d+\)$/, "")}`);
+    throw new LabError(`${file}: syntax error${err.loc ? ` on line ${err.loc.line}` : ""}: ${err.message.replace(/\s*\(\d+:\d+\)$/, "")}`);
   }
 }
 
-// ---------- test harness ----------
+/** Kept for callers that only have a single file of code. */
+export async function compile(code: string): Promise<string> {
+  return compileFile(await loadSucrase(), code, "tests/example.spec.ts");
+}
 
-type TestFn = (fixtures: { page: unknown; expect: unknown }) => Promise<void> | void;
+// ---------- fixtures ----------
 
-export async function runCode(code: string, o: RunOptions & { beforeEachTest: () => Promise<void> }): Promise<RunResult> {
+type AnyFn = (...args: unknown[]) => unknown;
+type FixtureFn = (deps: Record<string, unknown>, use: (value: unknown) => Promise<void>) => Promise<unknown> | unknown;
+interface FixtureDef {
+  name: string;
+  fn?: FixtureFn;
+  value?: unknown;
+  deps: string[];
+}
+type FixtureDefs = Record<string, FixtureDef>;
+
+/** Names destructured from a function's first parameter: `async ({ page, loginPage }, use) => ...` */
+export function paramNames(fn: AnyFn): string[] | null {
+  const src = fn.toString();
+  const m = src.match(/^[^(]*\(\s*\{([^}]*)\}/) || src.match(/^\s*(?:async\s*)?\(\s*\{([^}]*)\}/);
+  if (!m) {
+    // no destructuring: either no params (`async () =>`) or a plain identifier
+    if (/^\s*(?:async\s*)?\(\s*\)/.test(src) || /^\s*(?:async\s*)?function[^(]*\(\s*\)/.test(src) || /^\s*(?:async\s*)?\(\s*use\b/.test(src)) return [];
+    return null;
+  }
+  return m[1]
+    .split(",")
+    .map((s) => s.trim().replace(/[:=][\s\S]*$/, "").trim())
+    .filter((s) => s && !s.startsWith("..."));
+}
+
+function toFixtureDefs(obj: Record<string, unknown>): FixtureDefs {
+  const out: FixtureDefs = {};
+  for (const [name, raw] of Object.entries(obj)) {
+    const v = Array.isArray(raw) && raw.length === 2 && raw[1] && typeof raw[1] === "object" && !Array.isArray(raw[1]) ? raw[0] : raw;
+    if (typeof v === "function") out[name] = { name, fn: v as FixtureFn, deps: paramNames(v as AnyFn) || [] };
+    else out[name] = { name, value: v, deps: [] };
+  }
+  return out;
+}
+
+// ---------- test registry ----------
+
+type TestFn = (fixtures: Record<string, unknown>) => Promise<void> | void;
+interface TestEntry {
+  name: string;
+  fn: TestFn;
+  only?: boolean;
+  skip?: boolean;
+  defs: FixtureDefs;
+  file: string;
+}
+interface Hook {
+  prefix: string;
+  fn: TestFn;
+  defs: FixtureDefs;
+}
+class SkipSignal extends Error {
+  constructor(reason = "") {
+    super(reason);
+    this.name = "Skip";
+  }
+}
+
+export interface ProjectRunOptions extends RunOptions {
+  beforeEachTest: () => Promise<void>;
+}
+
+export async function runProject(input: ProjectFiles, o: ProjectRunOptions): Promise<RunResult> {
   const started = Date.now();
   const rt = createRuntime(o);
-  const tests: { name: string; fn: TestFn; only?: boolean; skip?: boolean }[] = [];
-  const beforeEach: TestFn[] = [];
-  const afterEach: TestFn[] = [];
+  const files: ProjectFiles = {};
+  for (const [p, c] of Object.entries(input)) files[normalizePath(p)] = c;
+
+  const tests: TestEntry[] = [];
+  const beforeEach: Hook[] = [];
+  const afterEach: Hook[] = [];
   const results: RunResult["tests"] = [];
   let prefix = "";
+  let currentFile = "";
+  let currentTitle = "";
 
-  const test = Object.assign(
-    (name: string, fn: TestFn) => {
-      tests.push({ name: prefix + name, fn });
-    },
-    {
-      only: (name: string, fn: TestFn) => tests.push({ name: prefix + name, fn, only: true }),
-      skip: (name: string, fn: TestFn) => tests.push({ name: prefix + name, fn, skip: true }),
-      fixme: (name: string, fn: TestFn) => tests.push({ name: prefix + name, fn, skip: true }),
-      describe: Object.assign(
-        (name: string, fn: () => void) => {
-          const prev = prefix;
-          prefix = `${prefix}${name} › `;
+  const consoleProxy = {
+    log: (...a: unknown[]) => o.onLog({ kind: "info", text: a.map((x) => (typeof x === "string" ? x : safeJson(x))).join(" ") }),
+    info: (...a: unknown[]) => consoleProxy.log(...a),
+    warn: (...a: unknown[]) => consoleProxy.log(...a),
+    error: (...a: unknown[]) => consoleProxy.log(...a),
+    debug: (...a: unknown[]) => consoleProxy.log(...a),
+    table: (x: unknown) => consoleProxy.log(x),
+  };
+
+  function makeTest(defs: FixtureDefs): AnyFn & Record<string, unknown> {
+    const register = (name: string, fn: TestFn, extra: Partial<TestEntry> = {}) => {
+      if (typeof fn !== "function") throw new LabError(`test("${name}"): the second argument must be a function`);
+      tests.push({ name: prefix + name, fn, defs, file: currentFile, ...extra });
+    };
+    const describe = Object.assign(
+      (name: string, fn: () => void) => {
+        const prev = prefix;
+        prefix = `${prefix}${name} › `;
+        try {
           fn();
+        } finally {
           prefix = prev;
-        },
-        { serial: undefined as unknown, configure: () => undefined },
-      ),
-      beforeEach: (fn: TestFn) => beforeEach.push(fn),
-      afterEach: (fn: TestFn) => afterEach.push(fn),
-      beforeAll: (fn: TestFn) => beforeEach.push(fn),
+        }
+      },
+      {
+        only: (name: string, fn: () => void) => describe(name, fn),
+        skip: (name: string) => o.onLog({ kind: "info", text: `skipped describe: ${name}` }),
+        serial: undefined as unknown,
+        parallel: undefined as unknown,
+        configure: () => undefined,
+      },
+    );
+    describe.serial = describe;
+    describe.parallel = describe;
+    const t = Object.assign((name: string, fn: TestFn) => register(name, fn), {
+      only: (name: string, fn: TestFn) => register(name, fn, { only: true }),
+      skip: (name?: string | boolean, fn?: TestFn) => {
+        if (typeof name === "string" && fn) return register(name, fn, { skip: true });
+        if (name === undefined || name === true) throw new SkipSignal();
+      },
+      fixme: (name: string, fn: TestFn) => register(name, fn, { skip: true }),
+      fail: () => undefined,
+      slow: () => undefined,
+      describe,
+      beforeEach: (fn: TestFn) => beforeEach.push({ prefix, fn, defs }),
+      afterEach: (fn: TestFn) => afterEach.push({ prefix, fn, defs }),
+      beforeAll: (fn: TestFn) => beforeEach.push({ prefix, fn, defs }),
       afterAll: () => undefined,
       step: async (name: string, fn: () => Promise<unknown>) => {
         o.onLog({ kind: "info", text: `step: ${name}` });
         return fn();
       },
       setTimeout: () => undefined,
-      use: () => undefined,
+      info: () => ({ title: currentTitle, titlePath: [currentTitle], annotations: [], project: { name: "lab" }, config: {}, retry: 0, outputPath: () => "" }),
+      use: (obj: Record<string, unknown>) => {
+        Object.assign(defs, toFixtureDefs(obj));
+      },
+      extend: (obj: Record<string, unknown>) => {
+        if (!obj || typeof obj !== "object") throw new LabError("test.extend() expects an object of fixtures, e.g. test.extend({ loginPage: async ({ page }, use) => { ... } })");
+        return makeTest({ ...defs, ...toFixtureDefs(obj) });
+      },
       expect: rt.expect,
-    },
-  );
-  test.describe.serial = test.describe;
+    });
+    return t as unknown as AnyFn & Record<string, unknown>;
+  }
 
-  const fixtures = { page: rt.page, expect: rt.expect, context: {}, browser: {}, request: undefined };
-  const consoleProxy = {
-    log: (...a: unknown[]) => o.onLog({ kind: "info", text: a.map((x) => (typeof x === "string" ? x : safeJson(x))).join(" ") }),
-    info: (...a: unknown[]) => consoleProxy.log(...a),
-    warn: (...a: unknown[]) => consoleProxy.log(...a),
-    error: (...a: unknown[]) => consoleProxy.log(...a),
-    table: (x: unknown) => consoleProxy.log(x),
+  const baseTest = makeTest({});
+  const builtins: Record<string, unknown> = {
+    "@playwright/test": { test: baseTest, expect: rt.expect, devices: {}, defineConfig: (c: unknown) => c, default: baseTest },
+    playwright: { chromium: {}, devices: {} },
+  };
+  builtins["playwright/test"] = builtins["@playwright/test"];
+
+  // ----- module loader -----
+  const s = await loadSucrase();
+  const cache = new Map<string, { exports: Record<string, unknown> }>();
+  const FunctionCtor = Function;
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as typeof Function;
+  const ARGS = ["require", "module", "exports", "console", "page", "expect", "test", "window", "document", "localStorage", "sessionStorage"];
+
+  function makeRequire(from: string, stack: string[]) {
+    return (spec: string) => {
+      if (spec in builtins) return builtins[spec];
+      const target = resolveModule(files, from, spec);
+      if (!target) {
+        const known = Object.keys(files).filter((f) => !SPEC_RE.test(f)).join(", ") || "none";
+        throw new LabError(`${from}: cannot find module '${spec}'. Files in this project: ${known}. Use a relative path such as '../pages/login.page'.`);
+      }
+      if (stack.includes(target)) throw new LabError(`Circular import: ${[...stack, target].join(" → ")}`);
+      return loadModule(target, [...stack, from]).exports;
+    };
+  }
+
+  function loadModule(path: string, stack: string[]) {
+    const hit = cache.get(path);
+    if (hit) return hit;
+    const mod = { exports: {} as Record<string, unknown> };
+    cache.set(path, mod);
+    const js = compileFile(s, files[path], path);
+    let fn: AnyFn;
+    try {
+      fn = new FunctionCtor(...ARGS, `"use strict";\n{\n${js}\n}`) as AnyFn;
+    } catch (e) {
+      if (e instanceof SyntaxError && /await/.test(e.message)) throw new LabError(`${path}: top-level await is only allowed in test files (*.spec.ts). Put the code inside a test or a function.`);
+      throw new LabError(`${path}: ${(e as Error).message}`);
+    }
+    const prevFile = currentFile;
+    currentFile = path;
+    try {
+      fn(makeRequire(path, stack), mod, mod.exports, consoleProxy, rt.page, rt.expect, baseTest, undefined, undefined, undefined, undefined);
+    } catch (e) {
+      if (e instanceof LabError || e instanceof AbortedError) throw e;
+      throw new LabError(`${path}: ${errMsg(e)}`);
+    } finally {
+      currentFile = prevFile;
+    }
+    return mod;
+  }
+
+  async function loadSpec(path: string) {
+    const js = compileFile(s, files[path], path);
+    let fn: AnyFn;
+    try {
+      fn = new AsyncFunction(...ARGS, `"use strict";\n{\n${js}\n}`) as AnyFn;
+    } catch (e) {
+      throw new LabError(`${path}: ${(e as Error).message}`);
+    }
+    const mod = { exports: {} as Record<string, unknown> };
+    currentFile = path;
+    try {
+      await fn(makeRequire(path, []), mod, mod.exports, consoleProxy, rt.page, rt.expect, baseTest, undefined, undefined, undefined, undefined);
+    } catch (e) {
+      if (e instanceof LabError || e instanceof AbortedError) throw e;
+      throw new LabError(`${path}: ${errMsg(e)}`);
+    } finally {
+      currentFile = "";
+    }
+  }
+
+  // ----- fixture resolution -----
+  const BASE_FIXTURES: Record<string, unknown> = { page: rt.page, expect: rt.expect, context: { pages: () => [rt.page], newPage: async () => rt.page, clearCookies: async () => undefined }, browser: {}, browserName: "chromium", baseURL: o.base, request: undefined };
+
+  async function buildFixtures(defs: FixtureDefs, wanted: string[] | null, teardowns: (() => Promise<void>)[]) {
+    const built = new Map<string, unknown>();
+    const resolving = new Set<string>();
+    const get = async (name: string): Promise<unknown> => {
+      if (built.has(name)) return built.get(name);
+      if (name in BASE_FIXTURES) return BASE_FIXTURES[name];
+      const def = defs[name];
+      if (!def) {
+        const have = Object.keys(defs);
+        throw new LabError(`Unknown fixture "${name}". ${have.length ? `Available custom fixtures: ${have.join(", ")}.` : ""} Define it with test.extend({ ${name}: async ({ page }, use) => { /* set up */ await use(value); /* tear down */ } })`);
+      }
+      if (!def.fn) {
+        built.set(name, def.value);
+        return def.value;
+      }
+      if (resolving.has(name)) throw new LabError(`Fixture "${name}" depends on itself`);
+      resolving.add(name);
+      const deps: Record<string, unknown> = {};
+      for (const d of def.deps) deps[d] = await get(d);
+      resolving.delete(name);
+      let resolveValue!: (v: unknown) => void;
+      let rejectValue!: (e: unknown) => void;
+      let used = false;
+      const valueP = new Promise<unknown>((res, rej) => {
+        resolveValue = res;
+        rejectValue = rej;
+      });
+      let resume!: () => void;
+      const gate = new Promise<void>((r) => (resume = r));
+      const use = async (v: unknown) => {
+        used = true;
+        resolveValue(v);
+        await gate;
+      };
+      const run = Promise.resolve()
+        .then(() => def.fn!(deps, use))
+        .then(() => {
+          if (!used) rejectValue(new LabError(`Fixture "${name}" finished without calling use(). Call "await use(value)" to hand the value to the test.`));
+        })
+        .catch((e) => {
+          if (!used) rejectValue(e);
+          else throw e;
+        });
+      const value = await valueP;
+      built.set(name, value);
+      teardowns.push(async () => {
+        resume();
+        await run;
+      });
+      return value;
+    };
+    const names = wanted ?? [...Object.keys(BASE_FIXTURES), ...Object.keys(defs)];
+    const out: Record<string, unknown> = {};
+    for (const n of names) out[n] = await get(n);
+    return out;
+  }
+
+  const wantedFor = (fns: AnyFn[]): string[] | null => {
+    const all = new Set<string>();
+    for (const f of fns) {
+      const p = paramNames(f);
+      if (p === null) return null;
+      p.forEach((n) => all.add(n));
+    }
+    return Array.from(all);
   };
 
+  // ----- run -----
   let ok = true;
   let error: string | undefined;
   try {
-    const js = await compile(code);
-    const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as new (...args: string[]) => (...a: unknown[]) => Promise<unknown>;
-    const fn = new AsyncFunction("page", "expect", "test", "console", "window", "document", "localStorage", "sessionStorage", '"use strict";\n' + js);
+    const specs = Object.keys(files)
+      .filter((f) => SPEC_RE.test(f) && !CONFIG_RE.test(f))
+      .sort();
+    const runnable = specs.length ? specs : Object.keys(files).length === 1 ? Object.keys(files) : [];
+    if (!runnable.length) throw new LabError("No test files found. Name your test files *.spec.ts (for example tests/login.spec.ts).");
+
     await o.beforeEachTest();
-    await fn(rt.page, rt.expect, test, consoleProxy, undefined, undefined, undefined, undefined);
+    for (const f of runnable) await loadSpec(f);
 
     const only = tests.filter((t) => t.only);
     const toRun = only.length ? only : tests;
+    if (!toRun.length) o.onLog({ kind: "info", text: "No test() blocks were registered." });
     let first = true;
     for (const t of toRun) {
       if (t.skip) {
@@ -1106,18 +1374,42 @@ export async function runCode(code: string, o: RunOptions & { beforeEachTest: ()
       if (!first) await o.beforeEachTest();
       first = false;
       o.onLog({ kind: "test", text: t.name });
+      currentTitle = t.name;
+      const teardowns: (() => Promise<void>)[] = [];
+      const before = beforeEach.filter((h) => t.name.startsWith(h.prefix));
+      const after = afterEach.filter((h) => t.name.startsWith(h.prefix)).reverse();
+      const defs = { ...t.defs };
+      for (const h of [...before, ...after]) Object.assign(defs, h.defs, t.defs);
       try {
-        for (const b of beforeEach) await b(fixtures);
-        await t.fn(fixtures);
-        for (const a of afterEach) await a(fixtures);
+        const wanted = wantedFor([t.fn as AnyFn, ...before.map((h) => h.fn as AnyFn), ...after.map((h) => h.fn as AnyFn)]);
+        const fx = await buildFixtures(defs, wanted, teardowns);
+        for (const b of before) await b.fn(fx);
+        await t.fn(fx);
+        for (const a of after) await a.fn(fx);
         results.push({ name: t.name, ok: true });
       } catch (e) {
         if (e instanceof AbortedError) throw e;
+        if (e instanceof SkipSignal) {
+          o.onLog({ kind: "info", text: `skipped: ${t.name}${e.message ? ` (${e.message})` : ""}` });
+          continue;
+        }
         const msg = errMsg(e);
         if (!(e instanceof LabError && e.logged)) o.onLog({ kind: "error", text: msg });
         results.push({ name: t.name, ok: false, error: msg });
         ok = false;
         error = error || msg;
+      } finally {
+        for (const td of teardowns.reverse()) {
+          try {
+            await td();
+          } catch (e) {
+            if (e instanceof AbortedError) throw e;
+            const msg = `fixture teardown failed: ${errMsg(e)}`;
+            if (!(e instanceof LabError && e.logged)) o.onLog({ kind: "error", text: msg });
+            ok = false;
+            error = error || msg;
+          }
+        }
       }
     }
   } catch (e) {
@@ -1128,6 +1420,11 @@ export async function runCode(code: string, o: RunOptions & { beforeEachTest: ()
     rt.highlight(null);
   }
   return { ok, error, assertions: rt.stats, tests: results, durationMs: Date.now() - started };
+}
+
+/** Runs a single test file. */
+export function runCode(code: string, o: ProjectRunOptions): Promise<RunResult> {
+  return runProject({ "tests/example.spec.ts": code }, o);
 }
 
 function errMsg(e: unknown) {

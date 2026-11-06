@@ -1,10 +1,19 @@
 import "server-only";
 
 export interface Solution {
+  /** Single-file Playwright solution, or a readable bundle of `files` for multi-file scenarios. */
   playwright: string;
+  /** Multi-file solution by path (framework scenarios). */
+  files?: Record<string, string>;
   selenium: string;
   notes: string[];
 }
+
+/** Joins project files into one readable listing. */
+export const bundle = (files: Record<string, string>) =>
+  Object.entries(files)
+    .map(([path, src]) => `// ===== ${path} =====\n${src.trim()}\n`)
+    .join("\n");
 
 const pwHeader = `import { test, expect } from '@playwright/test';\n\n`;
 const swagLogin = `  await page.goto('/');
@@ -52,6 +61,10 @@ ${body}
     }
 }
 `;
+
+
+/** Builds a Solution for a multi-file scenario; `playwright` becomes the readable bundle of its files. */
+const withFiles = (s: Omit<Solution, "playwright"> & { files: Record<string, string> }): Solution => ({ ...s, playwright: bundle(s.files) });
 
 export const SOLUTIONS: Record<string, Solution> = {
   "swagshop-login": {
@@ -763,4 +776,581 @@ test('filters and sort apply together', async ({ page }) => {
       "Re-find elements after the page re-renders (coupon = driver.findElement(...)) to avoid stale references.",
     ],
   },
+  "swagshop-pom-framework": withFiles({
+    files: {
+      "tests/checkout.spec.ts": `import { test, expect } from '../fixtures';
+
+test('badge shows the number of items in the cart', async ({ inventory }) => {
+  await inventory.addToCart('Trail Runner Backpack');
+  await inventory.addToCart('Night Ride Bike Light');
+  expect(await inventory.cartCount()).toBe(2);
+});
+
+test('products sort by price low to high', async ({ inventory }) => {
+  await inventory.sortBy('lohi');
+  const prices = await inventory.prices();
+  expect(prices).toHaveLength(6);
+  expect(prices).toEqual([...prices].sort((a, b) => a - b));
+});
+`,
+      "fixtures.ts": `import { test as base } from '@playwright/test';
+import { LoginPage } from './pages/login.page';
+import { InventoryPage } from './pages/inventory.page';
+
+export const test = base.extend<{ inventory: InventoryPage }>({
+  inventory: async ({ page }, use) => {
+    const login = new LoginPage(page);
+    await login.goto();
+    await login.login('standard_user', 'secret_sauce');
+    await use(new InventoryPage(page));
+  },
+});
+
+export { expect } from '@playwright/test';
+`,
+      "pages/login.page.ts": `import type { Page } from '@playwright/test';
+
+export class LoginPage {
+  constructor(private readonly page: Page) {}
+
+  async goto() {
+    await this.page.goto('/');
+  }
+
+  async login(username: string, password: string) {
+    await this.page.getByPlaceholder('Username').fill(username);
+    await this.page.getByPlaceholder('Password').fill(password);
+    await this.page.getByRole('button', { name: 'Login' }).click();
+  }
+}
+`,
+      "pages/inventory.page.ts": `import type { Page } from '@playwright/test';
+
+export class InventoryPage {
+  constructor(private readonly page: Page) {}
+
+  private card(productName: string) {
+    return this.page.getByTestId('inventory-item').filter({ hasText: productName });
+  }
+
+  async addToCart(productName: string) {
+    await this.card(productName).getByRole('button', { name: 'Add to cart' }).click();
+  }
+
+  async cartCount(): Promise<number> {
+    const badge = this.page.getByTestId('shopping-cart-badge');
+    return (await badge.count()) ? Number(await badge.textContent()) : 0;
+  }
+
+  async sortBy(value: 'az' | 'za' | 'lohi' | 'hilo') {
+    await this.page.getByTestId('product-sort-container').selectOption(value);
+  }
+
+  async prices(): Promise<number[]> {
+    const texts = await this.page.getByTestId('inventory-item-price').allTextContents();
+    return texts.map((t) => Number(t.replace('$', '')));
+  }
+}
+`,
+    },
+    selenium: `// ===== src/test/java/pages/LoginPage.java =====
+package pages;
+
+import org.openqa.selenium.By;
+import org.openqa.selenium.WebDriver;
+
+public class LoginPage {
+    private final WebDriver driver;
+    public LoginPage(WebDriver driver) { this.driver = driver; }
+
+    public void open(String baseUrl) { driver.get(baseUrl + "#/"); }
+
+    public InventoryPage login(String user, String password) {
+        driver.findElement(By.id("user-name")).sendKeys(user);
+        driver.findElement(By.id("password")).sendKeys(password);
+        driver.findElement(By.id("login-button")).click();
+        return new InventoryPage(driver);
+    }
+}
+
+// ===== src/test/java/pages/InventoryPage.java =====
+package pages;
+
+import org.openqa.selenium.*;
+import org.openqa.selenium.support.ui.Select;
+import java.util.*;
+
+public class InventoryPage {
+    private final WebDriver driver;
+    public InventoryPage(WebDriver driver) { this.driver = driver; }
+
+    public void addToCart(String productName) {
+        driver.findElement(By.xpath("//div[@data-test='inventory-item'][contains(., '" + productName + "')]//button")).click();
+    }
+
+    public int cartCount() {
+        List<WebElement> badge = driver.findElements(By.cssSelector("[data-test=shopping-cart-badge]"));
+        return badge.isEmpty() ? 0 : Integer.parseInt(badge.get(0).getText());
+    }
+
+    public void sortBy(String value) {
+        new Select(driver.findElement(By.cssSelector("[data-test=product-sort-container]"))).selectByValue(value);
+    }
+
+    public List<Double> prices() {
+        List<Double> out = new ArrayList<>();
+        for (WebElement e : driver.findElements(By.cssSelector("[data-test=inventory-item-price]")))
+            out.add(Double.parseDouble(e.getText().replace("$", "")));
+        return out;
+    }
+}
+
+// ===== src/test/java/tests/BaseTest.java =====
+package tests;
+
+import org.openqa.selenium.WebDriver;
+import org.openqa.selenium.chrome.ChromeDriver;
+import org.testng.annotations.*;
+import pages.*;
+
+public class BaseTest {
+    protected static final String BASE = "https://interview.qatechlabs.com/sandbox/swagshop";
+    protected WebDriver driver;
+    protected InventoryPage inventory;   // the "fixture": every test starts logged in
+
+    @BeforeMethod
+    public void setUp() {
+        driver = new ChromeDriver();
+        LoginPage login = new LoginPage(driver);
+        login.open(BASE);
+        inventory = login.login("standard_user", "secret_sauce");
+    }
+
+    @AfterMethod(alwaysRun = true)
+    public void tearDown() { driver.quit(); }
+}
+
+// ===== src/test/java/tests/CheckoutTest.java =====
+package tests;
+
+import org.testng.Assert;
+import org.testng.annotations.Test;
+import java.util.*;
+
+public class CheckoutTest extends BaseTest {
+    @Test
+    public void badgeShowsCartCount() {
+        inventory.addToCart("Trail Runner Backpack");
+        inventory.addToCart("Night Ride Bike Light");
+        Assert.assertEquals(inventory.cartCount(), 2);
+    }
+
+    @Test
+    public void sortsByPriceLowToHigh() {
+        inventory.sortBy("lohi");
+        List<Double> prices = inventory.prices();
+        List<Double> sorted = new ArrayList<>(prices);
+        Collections.sort(sorted);
+        Assert.assertEquals(prices, sorted);
+    }
+}
+`,
+    notes: [
+      "Page objects own the locators; tests own the intent. If the spec contains getByRole, the abstraction leaked.",
+      "A fixture that logs in replaces copy-pasted beforeEach blocks and makes every test start from a known state.",
+      "In Selenium the same shape is a BaseTest with @BeforeMethod; in Playwright it is test.extend, which is lazy and composable.",
+      "Keep page object methods returning data (prices()) rather than asserting. Assertions belong in the test.",
+    ],
+  }),
+  "peopledesk-fixture-teardown": withFiles({
+    files: {
+      "tests/employee-search.spec.ts": `import { test, expect } from '../fixtures';
+import { EmployeesPage } from '../pages/employees.page';
+
+test('a new employee can be found by name', async ({ adminPage, employee }) => {
+  const employees = new EmployeesPage(adminPage);
+  await employees.open();
+  await employees.search(employee.first);
+
+  await expect(adminPage.getByTestId('records-found')).toHaveText('(1) Record Found');
+  await expect(adminPage.getByTestId('employee-row')).toContainText(\`\${employee.first} \${employee.last}\`);
+});
+`,
+      "fixtures.ts": `import { test as base, type Page } from '@playwright/test';
+import { LoginPage } from './pages/login.page';
+import { EmployeesPage } from './pages/employees.page';
+
+export interface Employee {
+  first: string;
+  last: string;
+  id: string;
+}
+
+export const test = base.extend<{ adminPage: Page; employee: Employee }>({
+  adminPage: async ({ page }, use) => {
+    await new LoginPage(page).login('Admin', 'admin123');
+    await use(page);
+  },
+
+  employee: async ({ adminPage }, use) => {
+    const first = \`Auto\${Date.now()}\`;
+    const last = 'Fixture';
+    const employees = new EmployeesPage(adminPage);
+    await employees.open();
+    const id = await employees.add(first, last);
+
+    await use({ first, last, id });
+
+    // teardown: leave the system as we found it
+    await employees.open();
+    await employees.delete(first, last);
+  },
+});
+
+export { expect } from '@playwright/test';
+`,
+      "pages/login.page.ts": `import type { Page } from '@playwright/test';
+
+export class LoginPage {
+  constructor(private readonly page: Page) {}
+
+  async login(username: string, password: string) {
+    await this.page.goto('/');
+    await this.page.getByLabel('Username').fill(username);
+    await this.page.getByLabel('Password').fill(password);
+    await this.page.getByRole('button', { name: 'Login' }).click();
+  }
+}
+`,
+      "pages/employees.page.ts": `import type { Page } from '@playwright/test';
+
+export class EmployeesPage {
+  constructor(private readonly page: Page) {}
+
+  async open() {
+    await this.page.getByRole('link', { name: 'PIM' }).click();
+  }
+
+  async add(first: string, last: string): Promise<string> {
+    await this.page.getByRole('button', { name: '+ Add' }).click();
+    await this.page.getByLabel('First Name').fill(first);
+    await this.page.getByLabel('Last Name').fill(last);
+    const id = await this.page.getByLabel('Employee Id').inputValue();
+    await this.page.getByRole('button', { name: 'Save' }).click();
+    await this.page.getByRole('status').filter({ hasText: 'Successfully Saved' }).waitFor();
+    return id;
+  }
+
+  async search(name: string) {
+    await this.page.getByLabel('Employee Name').fill(name);
+    await this.page.getByRole('button', { name: 'Search' }).click();
+  }
+
+  async delete(first: string, last: string) {
+    await this.page.getByRole('button', { name: \`Delete \${first} \${last}\` }).click();
+    await this.page.getByRole('dialog').getByRole('button', { name: 'Yes, Delete' }).click();
+    await this.page.getByRole('status').filter({ hasText: 'Successfully Deleted' }).waitFor();
+  }
+}
+`,
+    },
+    selenium: `// ===== src/test/java/pages/EmployeesPage.java =====
+package pages;
+
+import org.openqa.selenium.*;
+import org.openqa.selenium.support.ui.*;
+import java.time.Duration;
+
+public class EmployeesPage {
+    private final WebDriver driver;
+    private final WebDriverWait wait;
+    public EmployeesPage(WebDriver driver) {
+        this.driver = driver;
+        this.wait = new WebDriverWait(driver, Duration.ofSeconds(10));
+    }
+
+    public void open() { driver.findElement(By.xpath("//aside//a[text()='PIM']")).click(); }
+
+    public String add(String first, String last) {
+        driver.findElement(By.xpath("//button[text()='+ Add']")).click();
+        driver.findElement(By.id("firstName")).sendKeys(first);
+        driver.findElement(By.id("lastName")).sendKeys(last);
+        String id = driver.findElement(By.id("employeeId")).getAttribute("value");
+        driver.findElement(By.xpath("//button[text()='Save']")).click();
+        wait.until(ExpectedConditions.textToBePresentInElementLocated(By.cssSelector("[role=status]"), "Successfully Saved"));
+        return id;
+    }
+
+    public void search(String name) {
+        driver.findElement(By.id("search-name")).sendKeys(name);
+        driver.findElement(By.xpath("//button[text()='Search']")).click();
+    }
+
+    public void delete(String first, String last) {
+        driver.findElement(By.cssSelector("[aria-label='Delete " + first + " " + last + "']")).click();
+        driver.findElement(By.xpath("//button[text()='Yes, Delete']")).click();
+        wait.until(ExpectedConditions.textToBePresentInElementLocated(By.cssSelector("[role=status]"), "Successfully Deleted"));
+    }
+}
+
+// ===== src/test/java/tests/EmployeeSearchTest.java =====
+package tests;
+
+import org.openqa.selenium.*;
+import org.openqa.selenium.chrome.ChromeDriver;
+import org.testng.Assert;
+import org.testng.annotations.*;
+import pages.*;
+
+public class EmployeeSearchTest {
+    static final String BASE = "https://interview.qatechlabs.com/sandbox/peopledesk";
+    WebDriver driver;
+    EmployeesPage employees;
+    String first, last = "Fixture";
+
+    @BeforeMethod
+    public void createEmployee() {               // the "fixture" setup
+        driver = new ChromeDriver();
+        driver.get(BASE + "#/auth/login");
+        driver.findElement(By.id("username")).sendKeys("Admin");
+        driver.findElement(By.id("password")).sendKeys("admin123");
+        driver.findElement(By.cssSelector("#login-form button[type=submit]")).click();
+        employees = new EmployeesPage(driver);
+        employees.open();
+        first = "Auto" + System.currentTimeMillis();
+        employees.add(first, last);
+    }
+
+    @Test
+    public void newEmployeeIsSearchable() {
+        employees.open();
+        employees.search(first);
+        Assert.assertEquals(driver.findElement(By.cssSelector("[data-test=records-found]")).getText(), "(1) Record Found");
+        Assert.assertTrue(driver.findElement(By.cssSelector("[data-test=employee-row]")).getText().contains(first + " " + last));
+    }
+
+    @AfterMethod(alwaysRun = true)
+    public void deleteEmployee() {               // the "fixture" teardown, runs even when the test fails
+        try {
+            employees.open();
+            employees.delete(first, last);
+        } finally {
+            driver.quit();
+        }
+    }
+}
+`,
+    notes: [
+      "Everything after await use() is teardown and runs even when the test fails, so the data never leaks into the next run.",
+      "Fixture dependencies (employee needs adminPage) make the setup order explicit instead of hidden in beforeEach ordering.",
+      "In a real project the fixture would create the employee through the API and only use the UI for the behaviour under test.",
+      "Waiting for the toast inside add() and delete() makes the page object safe to call back to back.",
+    ],
+  }),
+  "trendkart-data-driven": withFiles({
+    files: {
+      "tests/search.spec.ts": `import { test, expect } from '@playwright/test';
+import { SEARCHES } from '../data/searches';
+import { parsePrice } from '../helpers/money';
+import { SearchPage } from '../pages/search.page';
+
+for (const row of SEARCHES) {
+  test(\`search "\${row.query}" returns \${row.expectedCount} matching products\`, async ({ page }) => {
+    const search = new SearchPage(page);
+    await search.goto();
+    await search.search(row.query);
+
+    expect(await search.resultCount()).toBe(row.expectedCount);
+    const names = await search.productNames();
+    expect(names).toHaveLength(row.expectedCount);
+    for (const name of names) expect(name).toContain(row.mustContain);
+  });
+}
+
+test('results sort by price low to high', async ({ page }) => {
+  const search = new SearchPage(page);
+  await search.goto();
+  await search.search('shirt');
+  await search.sortBy('price_asc');
+
+  const prices = (await search.prices()).map(parsePrice);
+  expect(prices).toHaveLength(5);
+  expect(prices).toEqual([...prices].sort((a, b) => a - b));
+});
+`,
+      "data/searches.ts": `export interface SearchCase {
+  query: string;
+  expectedCount: number;
+  mustContain: string;
+}
+
+export const SEARCHES: SearchCase[] = [
+  { query: 'shirt', expectedCount: 5, mustContain: 'Shirt' },
+  { query: 'jeans', expectedCount: 2, mustContain: 'Jeans' },
+  { query: 'kurta', expectedCount: 2, mustContain: 'Kurta' },
+];
+`,
+      "helpers/money.ts": `/** "₹1,199" → 1199 */
+export function parsePrice(text: string): number {
+  return Number(text.replace(/[^0-9.]/g, ''));
+}
+`,
+      "pages/search.page.ts": `import { expect, type Page } from '@playwright/test';
+
+export class SearchPage {
+  constructor(private readonly page: Page) {}
+
+  async goto() {
+    await this.page.goto('/');
+  }
+
+  async search(query: string) {
+    const box = this.page.getByPlaceholder('Search for products, brands and more');
+    await box.fill(query);
+    await box.press('Enter');
+    await expect(this.page.getByTestId('loader')).toBeHidden();
+  }
+
+  async resultCount(): Promise<number> {
+    const text = await this.page.getByTestId('results-count').textContent();
+    return Number((text ?? '').replace(/[^0-9]/g, ''));
+  }
+
+  async productNames(): Promise<string[]> {
+    return this.page.getByTestId('product-card').locator('.product-product').allInnerTexts();
+  }
+
+  async prices(): Promise<string[]> {
+    return this.page.getByTestId('product-card').getByTestId('product-price').allTextContents();
+  }
+
+  async sortBy(value: 'price_asc' | 'price_desc' | 'rating' | 'discount') {
+    await this.page.getByLabel('Sort by').selectOption(value);
+    await expect(this.page.getByTestId('loader')).toBeHidden();
+    await expect(this.page.getByLabel('Sort by')).toHaveValue(value);
+  }
+}
+`,
+    },
+    selenium: `// ===== src/test/java/data/SearchCases.java =====
+package data;
+
+import org.testng.annotations.DataProvider;
+
+public class SearchCases {
+    @DataProvider(name = "searches")
+    public static Object[][] searches() {
+        return new Object[][] {
+            { "shirt", 5, "Shirt" },
+            { "jeans", 2, "Jeans" },
+            { "kurta", 2, "Kurta" },
+        };
+    }
+}
+
+// ===== src/test/java/helpers/Money.java =====
+package helpers;
+
+public class Money {
+    public static int parsePrice(String text) { return Integer.parseInt(text.replaceAll("[^0-9]", "")); }
+}
+
+// ===== src/test/java/pages/SearchPage.java =====
+package pages;
+
+import org.openqa.selenium.*;
+import org.openqa.selenium.support.ui.*;
+import java.time.Duration;
+import java.util.*;
+import java.util.stream.Collectors;
+
+public class SearchPage {
+    private final WebDriver driver;
+    private final WebDriverWait wait;
+    public SearchPage(WebDriver driver) {
+        this.driver = driver;
+        this.wait = new WebDriverWait(driver, Duration.ofSeconds(10));
+    }
+
+    public void search(String query) {
+        WebElement box = driver.findElement(By.id("search"));
+        box.clear();
+        box.sendKeys(query, Keys.ENTER);
+        wait.until(ExpectedConditions.invisibilityOfElementLocated(By.cssSelector("[data-testid=loader]")));
+    }
+
+    public int resultCount() {
+        return Integer.parseInt(driver.findElement(By.cssSelector("[data-testid=results-count]")).getText().replaceAll("[^0-9]", ""));
+    }
+
+    public List<String> productNames() {
+        return driver.findElements(By.cssSelector("[data-testid=product-card] .product-product")).stream().map(WebElement::getText).collect(Collectors.toList());
+    }
+
+    public List<String> prices() {
+        return driver.findElements(By.cssSelector("[data-testid=product-card] [data-testid=product-price]")).stream().map(WebElement::getText).collect(Collectors.toList());
+    }
+
+    public void sortBy(String value) {
+        new Select(driver.findElement(By.id("sort"))).selectByValue(value);
+        wait.until(ExpectedConditions.urlContains("sort=" + value));
+        wait.until(ExpectedConditions.invisibilityOfElementLocated(By.cssSelector("[data-testid=loader]")));
+    }
+}
+
+// ===== src/test/java/tests/SearchTest.java =====
+package tests;
+
+import data.SearchCases;
+import helpers.Money;
+import org.openqa.selenium.WebDriver;
+import org.openqa.selenium.chrome.ChromeDriver;
+import org.testng.Assert;
+import org.testng.annotations.*;
+import pages.SearchPage;
+import java.util.*;
+
+public class SearchTest {
+    static final String BASE = "https://interview.qatechlabs.com/sandbox/trendkart";
+    WebDriver driver;
+    SearchPage search;
+
+    @BeforeMethod
+    public void setUp() {
+        driver = new ChromeDriver();
+        driver.get(BASE + "#/");
+        search = new SearchPage(driver);
+    }
+
+    @Test(dataProvider = "searches", dataProviderClass = SearchCases.class)
+    public void searchReturnsMatchingProducts(String query, int expectedCount, String mustContain) {
+        search.search(query);
+        Assert.assertEquals(search.resultCount(), expectedCount);
+        List<String> names = search.productNames();
+        Assert.assertEquals(names.size(), expectedCount);
+        for (String n : names) Assert.assertTrue(n.contains(mustContain), n);
+    }
+
+    @Test
+    public void sortsByPriceLowToHigh() {
+        search.search("shirt");
+        search.sortBy("price_asc");
+        List<Integer> prices = new ArrayList<>();
+        for (String p : search.prices()) prices.add(Money.parsePrice(p));
+        List<Integer> sorted = new ArrayList<>(prices);
+        Collections.sort(sorted);
+        Assert.assertEquals(prices, sorted);
+    }
+
+    @AfterMethod(alwaysRun = true)
+    public void tearDown() { driver.quit(); }
+}
+`,
+    notes: [
+      "A loop at file level registers one named test per row, so a failure names the exact search term instead of \"row 3\".",
+      "The page object waits for the loader to disappear inside search() and sortBy(), so no test needs a sleep.",
+      "Helpers like parsePrice are pure functions: unit-test them separately and reuse them across page objects.",
+      "TestNG's @DataProvider is the Java equivalent. Interviewers often ask you to compare the two.",
+    ],
+  }),
 };

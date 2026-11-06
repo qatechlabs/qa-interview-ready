@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { LAB_APPS, scenariosFor, SCENARIOS } from "@/lab/scenarios";
+import { LAB_APPS, isFramework, scenariosFor, SCENARIOS } from "@/lab/scenarios";
 import { hasPremium } from "@/lib/access";
 import { formatPrice } from "@/lib/config";
 import { LabPassedBadge, LabPassedCount } from "@/components/lab/LabPassedBadge";
@@ -22,10 +22,11 @@ export default async function LabsIndex() {
         <p className="mt-3 max-w-3xl text-lg muted">
           The scenario round of an automation interview, for real. Read the interviewer&apos;s brief, write the test in the editor, press Run and watch your
           code click through the app. Each scenario then checks the app state and your assertions to tell you whether your test really proves the requirement.
+          Framework labs go further: build page objects, fixtures and data-driven suites from scratch, then download the project and run it with real Playwright.
         </p>
         <div className="mt-5 grid gap-3 sm:grid-cols-3">
           {[
-            ["✍️", "Write real test code", "Playwright-style TypeScript with getByRole, getByLabel, locators, auto-waiting and expect assertions."],
+            ["✍️", "Write real test code", "Playwright-style TypeScript with getByRole, getByLabel, locators, auto-waiting and expect assertions. Framework labs give you a whole project: page objects, fixtures and tests across files."],
             ["👀", "Watch it run live", "Every step is highlighted in the app as it happens, with a step log and clear failure messages."],
             ["✅", "Get verified", "Hidden checks confirm the app ended in the right state and that you asserted what matters."],
           ].map(([icon, t, d]) => (
@@ -70,6 +71,7 @@ export default async function LabsIndex() {
                     <div className="mb-2 flex flex-wrap gap-1.5">
                       <span className="chip">{s.level}</span>
                       <span className="chip">~{s.minutes} min</span>
+                      {isFramework(s) && <span className="chip" style={{ color: "var(--accent)" }}>Framework · multi-file</span>}
                       {s.free && !premium && <span className="chip" style={{ color: "var(--good)" }}>Free</span>}
                       {locked && <span className="chip">🔒 Full access</span>}
                       <LabPassedBadge id={s.id} />
