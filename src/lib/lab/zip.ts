@@ -85,8 +85,8 @@ export function makeZip(files: Record<string, string>): Blob {
 /** Wraps lab files into a runnable Playwright project. */
 export function projectFiles(files: Record<string, string>, opts: { name: string; baseURL: string; title: string }): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const [p, c] of Object.entries(files)) out[p] = c;
-  out["package.json"] = JSON.stringify(
+  const generated: Record<string, string> = {};
+  generated["package.json"] = JSON.stringify(
     {
       name: opts.name,
       private: true,
@@ -96,7 +96,7 @@ export function projectFiles(files: Record<string, string>, opts: { name: string
     null,
     2,
   );
-  out["playwright.config.ts"] = `import { defineConfig } from '@playwright/test';
+  generated["playwright.config.ts"] = `import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests',
@@ -108,7 +108,7 @@ export default defineConfig({
   reporter: [['list'], ['html', { open: 'never' }]],
 });
 `;
-  out["README.md"] = `# ${opts.title}
+  generated["README.md"] = `# ${opts.title}
 
 Exported from QA Interview Ready live labs. The same code that ran in the browser lab runs here with real Playwright.
 
@@ -120,6 +120,9 @@ npm test
 
 The tests run against the hosted practice app at ${opts.baseURL}. Change \`baseURL\` in \`playwright.config.ts\` to point them elsewhere.
 `;
-  out[".gitignore"] = "node_modules/\ntest-results/\nplaywright-report/\n";
+  generated[".gitignore"] = "node_modules/\ntest-results/\nplaywright-report/\n";
+  // the learner's own files win over the generated scaffolding
+  for (const [p, c] of Object.entries(generated)) out[p] = c;
+  for (const [p, c] of Object.entries(files)) out[p] = c;
   return out;
 }

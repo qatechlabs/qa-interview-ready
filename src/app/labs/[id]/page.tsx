@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { getScenario, labApp, SCENARIOS } from "@/lab/scenarios";
+import { ALL_SCENARIOS, getScenario, isWorkspace, labApp, SCENARIOS, workspaceFor } from "@/lab/scenarios";
 import { SOLUTIONS } from "@/lab/solutions";
 import { hasPremium } from "@/lib/access";
 import { formatPrice } from "@/lib/config";
@@ -29,9 +29,11 @@ export default async function LabPage({ params }: { params: { id: string } }) {
   const ghUser = ghCfg ? await getGitHubUser() : null;
   const github = { configured: !!ghCfg, org: ghCfg?.org || "", user: ghUser ? { login: ghUser.login, name: ghUser.name, avatar: ghUser.avatar } : null };
   const solution = locked ? null : SOLUTIONS[s.id] ?? null;
+  const workspace = isWorkspace(s);
   const list = SCENARIOS.filter((x) => x.app === s.app);
   const idx = list.findIndex((x) => x.id === s.id);
-  const next = list[idx + 1];
+  // after the last task of an app, the next step is its workspace
+  const next = workspace ? undefined : list[idx + 1] ?? workspaceFor(s.app);
 
   return (
     <div className="relative left-1/2 w-[min(1360px,calc(100vw-2rem))] -translate-x-1/2 space-y-5">
@@ -40,7 +42,7 @@ export default async function LabPage({ params }: { params: { id: string } }) {
         <span>·</span>
         <Link href={`/labs#${app.id}`} className="hover:underline">{app.icon} {app.name}</Link>
         <span>·</span>
-        <span>Scenario {idx + 1} of {list.length}</span>
+        <span>{workspace ? "Framework workspace" : `Scenario ${idx + 1} of ${list.length}`}</span>
       </nav>
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
@@ -57,7 +59,7 @@ export default async function LabPage({ params }: { params: { id: string } }) {
           </p>
         </div>
         {next && (
-          <Link href={`/labs/${next.id}`} className="btn btn-ghost">Next scenario →</Link>
+          <Link href={`/labs/${next.id}`} className="btn btn-ghost">{isWorkspace(next) ? "Build the framework →" : "Next scenario →"}</Link>
         )}
       </header>
 
@@ -76,7 +78,7 @@ export default async function LabPage({ params }: { params: { id: string } }) {
           <div className="card p-6 text-center">
             <p className="text-lg font-semibold">🔒 This lab is part of full access</p>
             <p className="mx-auto mt-1 max-w-md text-sm muted">
-              Unlock the live editor, the scenario checks and the reference solutions in Playwright and Selenium Java for all {SCENARIOS.length} labs, plus every
+              Unlock the live editor, the scenario checks and the reference solutions in Playwright and Selenium Java for all {ALL_SCENARIOS.length} labs, plus every
               interview answer. One payment of {formatPrice()}, lifetime access.
             </p>
             <div className="mt-4 flex flex-wrap justify-center gap-2">

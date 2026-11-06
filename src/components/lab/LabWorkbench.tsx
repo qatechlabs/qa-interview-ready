@@ -1,8 +1,9 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getScenario, isFramework, isRemote, labApp, MAIN_FILE, starterFiles } from "@/lab/scenarios";
+import { getScenario, isFramework, isRemote, isWorkspace, labApp, MAIN_FILE, starterFiles } from "@/lab/scenarios";
 import type { LogEntry, RunResult } from "@/lib/lab/runtime";
 import { markLabPassed } from "@/lib/lab/progress";
+import { SITE } from "@/lib/config";
 
 interface SolutionView {
   playwright: string;
@@ -53,6 +54,9 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
   const app = labApp(scenario.app);
   const framework = isFramework(scenario);
   const remote = isRemote(scenario);
+  const workspace = isWorkspace(scenario);
+  /** Workspaces on the practice apps can run both in the browser and on GitHub Actions. */
+  const canRunOnGitHub = remote || workspace;
   const starter = useMemo(() => starterFiles(scenario), [scenario]);
   const [files, setFiles] = useState<Files>(starter);
   const [active, setActive] = useState<string>(() => sortPaths(starter).find((p) => p.startsWith("tests/")) || sortPaths(starter)[0]);
@@ -401,8 +405,8 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
     const name = prompt("New file path (for example pages/cart.page.ts)", "pages/");
     if (!name) return;
     const path = name.trim().replace(/^\/+/, "");
-    if (!/^[\w.-]+(\/[\w.-]+)*\.(ts|js|json)$/.test(path)) {
-      alert("Use a path like pages/cart.page.ts (letters, numbers, dots, dashes, folders).");
+    if (!/^[\w.-]+(\/[\w.-]+)*\.(ts|js|mjs|json|md|yml|yaml|csv|txt|env\.example)$/.test(path)) {
+      alert("Use a path like pages/cart.page.ts (letters, numbers, dots, dashes, folders; .ts .js .json .md .yml .csv).");
       return;
     }
     if (path in files) {
@@ -440,7 +444,7 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
   };
   const download = async () => {
     const { makeZip, projectFiles } = await import("@/lib/lab/zip");
-    const origin = typeof location !== "undefined" ? location.origin : "https://interview.qatechlabs.com";
+    const origin = typeof location !== "undefined" ? location.origin : SITE.url;
     const project = projectFiles(framework ? files : { [MAIN_FILE]: files[MAIN_FILE] ?? Object.values(files)[0] }, {
       name: `qa-lab-${scenario.id}`,
       baseURL: remote ? app.base : origin + app.base,
@@ -462,7 +466,7 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
           <section className="card p-5">
             <h2 className="text-xs font-semibold uppercase tracking-wide accent">Interview scenario</h2>
             <p className="mt-2 leading-relaxed">{scenario.story}</p>
-            <h3 className="mt-4 text-sm font-semibold">Acceptance criteria</h3>
+            <h3 className="mt-4 text-sm font-semibold">{workspace ? "What the framework must have" : "Acceptance criteria"}</h3>
             <ol className="mt-1 list-decimal space-y-1 pl-5 text-sm">
               {scenario.criteria.map((c) => (
                 <li key={c}>{c}</li>
@@ -498,12 +502,22 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
                 <button onClick={resetCode} className="btn btn-ghost !px-2.5 !py-1 text-xs" disabled={running}>Reset</button>
                 {running ? (
                   <button onClick={stop} className="btn !px-3 !py-1 text-xs" style={{ background: "#e11d48", color: "#fff" }}>■ Stop</button>
-                ) : remote && !github?.user ? (
-                  <a href={`/api/github/login?next=${encodeURIComponent(`/labs/${id}`)}`} className="btn btn-primary !px-3 !py-1 text-xs" title="Real-site labs run on GitHub Actions in your repo">
-                    Sign in with GitHub to run
-                  </a>
                 ) : (
-                  <button onClick={run} className="btn btn-primary !px-3 !py-1 text-xs" title="Ctrl/⌘ + Enter">{remote ? "▶ Run on GitHub" : "▶ Run tests"}</button>
+                  <>
+                    {!remote && (
+                      <button onClick={run} className="btn btn-primary !px-3 !py-1 text-xs" title="Ctrl/⌘ + Enter">{workspace ? "▶ Run in browser" : "▶ Run tests"}</button>
+                    )}
+                    {canRunOnGitHub &&
+                      (github?.user ? (
+                        <button onClick={runRemote} className={`btn ${remote ? "btn-primary" : "btn-ghost"} !px-3 !py-1 text-xs`} title={remote ? "Ctrl/⌘ + Enter" : "Commit and run with real Playwright on GitHub Actions, using your playwright.config.ts"}>
+                          {remote ? "▶ Run on GitHub" : "☁ Run on GitHub"}
+                        </button>
+                      ) : (
+                        <a href={`/api/github/login?next=${encodeURIComponent(`/labs/${id}`)}`} className={`btn ${remote ? "btn-primary" : "btn-ghost"} !px-3 !py-1 text-xs`} title="Runs on GitHub Actions in a repo created in your name">
+                          {remote ? "Sign in with GitHub to run" : "Sign in to run on GitHub"}
+                        </a>
+                      ))}
+                  </>
                 )}
               </div>
             </div>
@@ -566,10 +580,16 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
             </div>
           </section>
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs muted">
-            {remote ? (
+            {workspace && !remote ? (
+              <p>
+                Your whole project, like a repo in VS Code. <b>Run in browser</b> runs every *.spec.ts against the practice app with the in-browser runtime (it ignores
+                playwright.config.ts but the review checks it). <b>Run on GitHub</b> commits the project and runs it with real Playwright and <i>your</i> config, with{" "}
+                <code className="inline-code">BASE_URL={SITE.url}{app.base}</code>. Ctrl/⌘ + Enter runs in the browser.
+              </p>
+            ) : remote ? (
               <p>
                 Runs with real Playwright on GitHub Actions in your own repo: the files are committed, the <b>Lab run</b> workflow starts with{" "}
-                <code className="inline-code">LAB_BASE_URL={app.base}</code>, and the results come back here. Saved in this browser. Ctrl/⌘ + Enter runs.
+                <code className="inline-code">BASE_URL={app.base}</code>{workspace ? " and your own playwright.config.ts" : ""}, and the results come back here. Saved in this browser. Ctrl/⌘ + Enter runs.
               </p>
             ) : (
               <p>
@@ -668,6 +688,12 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
               <a href={app.base} target="_blank" rel="noreferrer" className="text-xs font-semibold accent hover:underline">Open ↗</a>
             </div>
             <iframe ref={frame} src={app.base} title={`${app.name} practice app`} className="block h-[420px] w-full bg-white" />
+            {runUrl && (
+              <p className="border-t px-3 py-2 text-xs" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
+                <a href={runUrl} target="_blank" rel="noreferrer" className="font-semibold accent hover:underline">Open the GitHub Actions run ↗</a>
+                <span className="muted"> · runs with your playwright.config.ts; HTML report in the run&apos;s artifacts.</span>
+              </p>
+            )}
           </section>
           )}
 
@@ -678,7 +704,15 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
               {verdict === "fail" && <span className="chip" style={{ color: "#e11d48" }}>✗ Not yet</span>}
             </div>
             <div className="max-h-56 overflow-auto rounded-lg p-2 font-mono text-[12px] leading-relaxed" style={{ background: "var(--surface-2)" }}>
-              {!log.length && <p className="muted">{remote ? "Press Run on GitHub to commit your code and run it against the real site. Results appear here in a few minutes." : "Press Run tests to watch your code drive the practice app in the preview."}</p>}
+              {!log.length && (
+                <p className="muted">
+                  {remote
+                    ? "Press Run on GitHub to commit your code and run it against the real site. Results appear here in a few minutes."
+                    : workspace
+                      ? "Build your project in the file tree, then Run in browser for fast feedback or Run on GitHub to prove it with real Playwright and your config."
+                      : "Press Run tests to watch your code drive the practice app in the preview."}
+                </p>
+              )}
               {log.map((e, i) => (
                 <div key={i} className="flex gap-2 whitespace-pre-wrap break-words">
                   <span aria-hidden style={{ color: e.kind === "pass" ? "var(--good)" : e.kind === "fail" || e.kind === "error" ? "#e11d48" : "var(--muted)" }}>
@@ -694,7 +728,7 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
             </div>
             {checks && (
               <div className="mt-3">
-                <h3 className="mb-1 text-sm font-semibold">Scenario checks</h3>
+                <h3 className="mb-1 text-sm font-semibold">{workspace ? "Framework review" : "Scenario checks"}</h3>
                 <ul className="space-y-1 text-sm">
                   {checks.map((c) => (
                     <li key={c.label} className="flex gap-2">

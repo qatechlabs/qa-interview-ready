@@ -66,6 +66,97 @@ ${body}
 /** Builds a Solution for a multi-file scenario; `playwright` becomes the readable bundle of its files. */
 const withFiles = (s: Omit<Solution, "playwright"> & { files: Record<string, string> }): Solution => ({ ...s, playwright: bundle(s.files) });
 
+
+/** Reference playwright.config.ts for the framework workspaces. */
+const wsConfig = (defaultBaseURL: string, testIdAttribute?: string, timeout = 30_000) => `import { defineConfig, devices } from '@playwright/test';
+
+/**
+ * BASE_URL is set by CI (the lab runner passes the site under test); the default is for local runs.
+ */
+export default defineConfig({
+  testDir: './tests',
+  timeout: ${timeout.toLocaleString("en-US").replace(",", "_")},
+  expect: { timeout: ${Math.min(timeout, 15_000).toLocaleString("en-US").replace(",", "_")} },
+  fullyParallel: true,
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 2 : 0,
+  workers: process.env.CI ? 2 : undefined,
+  reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : [['list']],
+  use: {
+    baseURL: process.env.BASE_URL || '${defaultBaseURL}',${testIdAttribute ? `\n    testIdAttribute: '${testIdAttribute}',` : ""}
+    trace: 'retain-on-failure',
+    screenshot: 'only-on-failure',
+    ...devices['Desktop Chrome'],
+  },
+});
+`;
+
+const wsReadme = (name: string, site: string) => `# ${name} automation framework
+
+Playwright + TypeScript framework for ${site}.
+
+## Structure
+
+- \`playwright.config.ts\`: base URL from \`BASE_URL\`, retries and HTML report on CI, trace on failure
+- \`pages/\`: page objects, one class per page; all locators live here
+- \`fixtures.ts\`: \`test.extend\` providing ready page objects (\`app\`) and a logged-in state
+- \`data/\`: users and test data, unique per run where the app keeps state
+- \`tests/\`: specs grouped by feature and tagged \`@smoke\` / \`@regression\`
+
+## Run
+
+\`\`\`bash
+npm install
+npx playwright install chromium
+npx playwright test                      # everything
+npx playwright test --grep @smoke        # smoke only
+BASE_URL=https://staging.example.com npx playwright test
+npx playwright show-report
+\`\`\`
+`;
+
+const wsSelenium = (name: string) => `// The same framework in Selenium Java + TestNG (Maven layout)
+//
+// src/test/java/config/Config.java        reads BASE_URL from System.getenv with a default, browser name, timeouts
+// src/test/java/pages/*Page.java          one class per page; locators as private By fields; methods return the next page
+// src/test/java/base/BaseTest.java        @BeforeMethod creates the driver (WebDriverManager), applies implicit/explicit waits,
+//                                         @AfterMethod takes a screenshot on failure (ITestResult) and quits
+// src/test/java/data/Users.java           users and products; unique names via System.currentTimeMillis()
+// src/test/java/tests/*Test.java          @Test(groups = {"smoke"}) / {"regression"}; assertions only in tests
+// src/test/resources/testng.xml           suites per group, parallel="methods", thread-count="2"
+// pom.xml                                 selenium-java, testng, webdrivermanager, maven-surefire with <suiteXmlFiles>
+//
+// Example page object for ${name}:
+public class LoginPage {
+    private final WebDriver driver;
+    private final WebDriverWait wait;
+    private final By username = By.cssSelector("input[placeholder='Username']");
+    private final By password = By.cssSelector("input[placeholder='Password']");
+    private final By submit = By.cssSelector("button[type=submit], #login-button");
+
+    public LoginPage(WebDriver driver) {
+        this.driver = driver;
+        this.wait = new WebDriverWait(driver, Duration.ofSeconds(15));
+    }
+
+    public LoginPage open() { driver.get(Config.baseUrl()); return this; }
+
+    public void login(String user, String pass) {
+        wait.until(ExpectedConditions.visibilityOfElementLocated(username)).sendKeys(user);
+        driver.findElement(password).sendKeys(pass);
+        driver.findElement(submit).click();
+    }
+}
+`;
+
+const WS_NOTES = [
+  "The config is the first thing a reviewer opens: environment-driven baseURL, retries only on CI, trace retained on failure, HTML report. Nothing hard-coded.",
+  "Every locator lives in a page object; specs read as test cases. If a selector changes, one file changes.",
+  "Fixtures compose: app builds the page objects, loggedIn (or adminApp) reuses app. Tests ask for the state they need and nothing more.",
+  "Test data is unique per run (Date.now()) wherever the app keeps state, so the suite can run in parallel and on a shared environment.",
+  "Grouping with test.describe and @smoke/@regression tags lets CI run a 2-minute smoke suite on every push and the full suite nightly: npx playwright test --grep @smoke.",
+];
+
 export const SOLUTIONS: Record<string, Solution> = {
   "swagshop-login": {
     playwright:
@@ -2075,4 +2166,798 @@ public class ProductsApiTest {
       "Three layers of assertion: transport status, API status code, and the shape and content of the data.",
     ],
   },
+  // ---------------- Framework workspaces (reference frameworks) ----------------
+  "workspace-swagshop": withFiles({
+    files: {
+      "playwright.config.ts": wsConfig("https://interview.qatechlabs.com/sandbox/swagshop"),
+      "README.md": wsReadme("SwagShop", "the SwagShop practice store"),
+      "data/users.ts": `export const users = {
+  standard: { username: 'standard_user', password: 'secret_sauce' },
+  locked: { username: 'locked_out_user', password: 'secret_sauce' },
+} as const;
+
+export const products = {
+  backpack: 'Trail Runner Backpack',
+  bikeLight: 'Night Ride Bike Light',
+} as const;
+`,
+      "pages/login.page.ts": `import type { Page } from '@playwright/test';
+
+export class LoginPage {
+  readonly error;
+  constructor(private readonly page: Page) {
+    this.error = page.getByRole('alert');
+  }
+
+  async goto() {
+    await this.page.goto('/');
+  }
+
+  async login(username: string, password: string) {
+    await this.page.getByPlaceholder('Username').fill(username);
+    await this.page.getByPlaceholder('Password').fill(password);
+    await this.page.getByRole('button', { name: 'Login' }).click();
+  }
+}
+`,
+      "pages/inventory.page.ts": `import type { Page } from '@playwright/test';
+
+export class InventoryPage {
+  readonly title;
+  readonly items;
+  readonly badge;
+  constructor(private readonly page: Page) {
+    this.title = page.getByTestId('title');
+    this.items = page.getByTestId('inventory-item');
+    this.badge = page.getByTestId('shopping-cart-badge');
+  }
+
+  private card(name: string) {
+    return this.items.filter({ hasText: name });
+  }
+
+  async addToCart(name: string) {
+    await this.card(name).getByRole('button', { name: 'Add to cart' }).click();
+  }
+
+  async sortBy(value: 'az' | 'za' | 'lohi' | 'hilo') {
+    await this.page.getByTestId('product-sort-container').selectOption(value);
+  }
+
+  async prices(): Promise<number[]> {
+    return (await this.page.getByTestId('inventory-item-price').allTextContents()).map((t) => Number(t.replace('$', '')));
+  }
+
+  async openCart() {
+    await this.page.getByRole('button', { name: 'Shopping cart' }).click();
+  }
+}
+`,
+      "pages/cart.page.ts": `import type { Page } from '@playwright/test';
+
+export class CartPage {
+  readonly items;
+  readonly names;
+  constructor(page: Page) {
+    this.items = page.getByTestId('inventory-item');
+    this.names = page.getByTestId('inventory-item-name');
+  }
+}
+`,
+      "fixtures.ts": `import { test as base } from '@playwright/test';
+import { LoginPage } from './pages/login.page';
+import { InventoryPage } from './pages/inventory.page';
+import { CartPage } from './pages/cart.page';
+import { users } from './data/users';
+
+type Pages = { login: LoginPage; inventory: InventoryPage; cart: CartPage };
+
+export const test = base.extend<{ app: Pages; loggedIn: Pages }>({
+  app: async ({ page }, use) => {
+    const app = { login: new LoginPage(page), inventory: new InventoryPage(page), cart: new CartPage(page) };
+    await app.login.goto();
+    await use(app);
+  },
+  loggedIn: async ({ app }, use) => {
+    await app.login.login(users.standard.username, users.standard.password);
+    await use(app);
+  },
+});
+
+export { expect } from '@playwright/test';
+`,
+      "tests/login.spec.ts": `import { test, expect } from '../fixtures';
+import { users } from '../data/users';
+
+test.describe('Login @smoke', () => {
+  test('standard user lands on the products page', async ({ app }) => {
+    await app.login.login(users.standard.username, users.standard.password);
+    await expect(app.inventory.title).toHaveText('Products');
+    await expect(app.inventory.items).toHaveCount(6);
+  });
+
+  test('locked out user is told why', async ({ app }) => {
+    await app.login.login(users.locked.username, users.locked.password);
+    await expect(app.login.error).toContainText('locked out');
+    await expect(app.inventory.items).toHaveCount(0);
+  });
+});
+`,
+      "tests/shopping.spec.ts": `import { test, expect } from '../fixtures';
+import { products } from '../data/users';
+
+test.describe('Shopping @regression', () => {
+  test('two items added show in the badge and the cart', async ({ loggedIn: app }) => {
+    await app.inventory.addToCart(products.backpack);
+    await app.inventory.addToCart(products.bikeLight);
+    await expect(app.inventory.badge).toHaveText('2');
+
+    await app.inventory.openCart();
+    await expect(app.cart.items).toHaveCount(2);
+    await expect(app.cart.names).toHaveText([products.backpack, products.bikeLight]);
+  });
+
+  test('sorting low to high orders prices ascending', async ({ loggedIn: app }) => {
+    await app.inventory.sortBy('lohi');
+    const prices = await app.inventory.prices();
+    expect(prices).toHaveLength(6);
+    expect(prices).toEqual([...prices].sort((a, b) => a - b));
+  });
+});
+`,
+    },
+    selenium: wsSelenium("SwagShop"),
+    notes: WS_NOTES,
+  }),
+  "workspace-peopledesk": withFiles({
+    files: {
+      "playwright.config.ts": wsConfig("https://interview.qatechlabs.com/sandbox/peopledesk"),
+      "README.md": wsReadme("PeopleDesk HR", "the PeopleDesk practice portal"),
+      "data/users.ts": `export const admin = { username: 'Admin', password: 'admin123' } as const;
+
+/** Unique per run so tests never collide with each other's data. */
+export const newEmployee = () => ({ first: \`Auto\${Date.now()}\`, last: 'Framework' });
+`,
+      "pages/login.page.ts": `import type { Page } from '@playwright/test';
+
+export class LoginPage {
+  readonly error;
+  constructor(private readonly page: Page) {
+    this.error = page.getByRole('alert');
+  }
+
+  async goto() {
+    await this.page.goto('/');
+  }
+
+  async login(username: string, password: string) {
+    await this.page.getByLabel('Username').fill(username);
+    await this.page.getByLabel('Password').fill(password);
+    await this.page.getByRole('button', { name: 'Login' }).click();
+  }
+}
+`,
+      "pages/employees.page.ts": `import type { Page } from '@playwright/test';
+
+export class EmployeesPage {
+  readonly recordsFound;
+  readonly rows;
+  readonly status;
+  constructor(private readonly page: Page) {
+    this.recordsFound = page.getByTestId('records-found');
+    this.rows = page.getByTestId('employee-row');
+    this.status = page.getByRole('status');
+  }
+
+  async open() {
+    await this.page.getByRole('link', { name: 'PIM' }).click();
+  }
+
+  async add(first: string, last: string): Promise<string> {
+    await this.page.getByRole('button', { name: '+ Add' }).click();
+    await this.page.getByLabel('First Name').fill(first);
+    await this.page.getByLabel('Last Name').fill(last);
+    const id = await this.page.getByLabel('Employee Id').inputValue();
+    await this.page.getByRole('button', { name: 'Save' }).click();
+    await this.status.filter({ hasText: 'Successfully Saved' }).waitFor();
+    await this.page.getByRole('button', { name: 'Back to Employee List' }).click();
+    return id;
+  }
+
+  async search(name: string) {
+    await this.page.getByLabel('Employee Name').fill(name);
+    await this.page.getByRole('button', { name: 'Search' }).click();
+  }
+
+  async delete(first: string, last: string) {
+    await this.page.getByRole('button', { name: \`Delete \${first} \${last}\` }).click();
+    await this.page.getByRole('dialog').getByRole('button', { name: 'Yes, Delete' }).click();
+    await this.status.filter({ hasText: 'Successfully Deleted' }).waitFor();
+  }
+}
+`,
+      "pages/leave.page.ts": `import type { Page } from '@playwright/test';
+
+export class LeavePage {
+  readonly status;
+  readonly rows;
+  constructor(private readonly page: Page) {
+    this.status = page.getByRole('status');
+    this.rows = page.getByTestId('leave-row');
+  }
+
+  async open() {
+    await this.page.getByRole('link', { name: 'Leave' }).click();
+  }
+
+  async apply(type: string, from: string, to: string) {
+    await this.page.getByLabel('Leave Type').selectOption(type);
+    await this.page.getByLabel('From Date').fill(from);
+    await this.page.getByLabel('To Date').fill(to);
+    await this.page.getByRole('button', { name: 'Apply' }).click();
+  }
+
+  validationError(text: string) {
+    return this.page.getByText(text);
+  }
+}
+`,
+      "fixtures.ts": `import { test as base } from '@playwright/test';
+import { LoginPage } from './pages/login.page';
+import { EmployeesPage } from './pages/employees.page';
+import { LeavePage } from './pages/leave.page';
+import { admin, newEmployee } from './data/users';
+
+type Pages = { login: LoginPage; employees: EmployeesPage; leave: LeavePage };
+
+export const test = base.extend<{ app: Pages; adminApp: Pages; employee: { first: string; last: string; id: string } }>({
+  app: async ({ page }, use) => {
+    const app = { login: new LoginPage(page), employees: new EmployeesPage(page), leave: new LeavePage(page) };
+    await app.login.goto();
+    await use(app);
+  },
+  adminApp: async ({ app }, use) => {
+    await app.login.login(admin.username, admin.password);
+    await use(app);
+  },
+  // creates an employee for the test and removes it afterwards
+  employee: async ({ adminApp }, use) => {
+    const e = newEmployee();
+    await adminApp.employees.open();
+    const id = await adminApp.employees.add(e.first, e.last);
+    await use({ ...e, id });
+    await adminApp.employees.open();
+    await adminApp.employees.delete(e.first, e.last);
+  },
+});
+
+export { expect } from '@playwright/test';
+`,
+      "tests/login.spec.ts": `import { test, expect } from '../fixtures';
+import { admin } from '../data/users';
+
+test.describe('Login @smoke', () => {
+  test('admin reaches the dashboard', async ({ app }) => {
+    await app.login.login(admin.username, admin.password);
+    await expect(app.login.error).toHaveCount(0);
+    await expect(app.employees.rows).toHaveCount(0);
+  });
+
+  test('wrong password is rejected', async ({ app }) => {
+    await app.login.login(admin.username, 'wrong-password');
+    await expect(app.login.error).toHaveText('Invalid credentials');
+  });
+});
+`,
+      "tests/pim.spec.ts": `import { test, expect } from '../fixtures';
+
+test.describe('PIM @regression', () => {
+  test('a new employee can be found by name', async ({ adminApp: app, employee }) => {
+    await app.employees.search(employee.first);
+    await expect(app.employees.recordsFound).toHaveText('(1) Record Found');
+    await expect(app.employees.rows).toContainText(\`\${employee.first} \${employee.last}\`);
+  });
+
+  test('leave dates are validated before submission', async ({ adminApp: app }) => {
+    await app.leave.open();
+    await app.leave.apply('Casual Leave', '2026-12-10', '2026-12-08');
+    await expect(app.leave.validationError('To date should be after from date')).toBeVisible();
+    await app.leave.apply('Casual Leave', '2026-12-10', '2026-12-12');
+    await expect(app.leave.status).toContainText('Successfully Submitted');
+    await expect(app.leave.rows).toHaveCount(1);
+  });
+});
+`,
+    },
+    selenium: wsSelenium("PeopleDesk"),
+    notes: WS_NOTES,
+  }),
+  "workspace-trendkart": withFiles({
+    files: {
+      "playwright.config.ts": wsConfig("https://interview.qatechlabs.com/sandbox/trendkart"),
+      "README.md": wsReadme("TrendKart", "the TrendKart practice marketplace"),
+      "data/searches.ts": `export const SEARCHES = [
+  { query: 'shirt', expectedCount: 5, mustContain: 'Shirt' },
+  { query: 'jeans', expectedCount: 2, mustContain: 'Jeans' },
+  { query: 'kurta', expectedCount: 2, mustContain: 'Kurta' },
+] as const;
+`,
+      "utils/money.ts": `/** "₹1,199" → 1199 */
+export const parsePrice = (text: string) => Number(text.replace(/[^0-9.]/g, ''));
+`,
+      "pages/search.page.ts": `import { expect, type Page } from '@playwright/test';
+
+export class SearchPage {
+  readonly cards;
+  constructor(private readonly page: Page) {
+    this.cards = page.getByTestId('product-card');
+  }
+
+  async goto() {
+    await this.page.goto('/');
+  }
+
+  async search(query: string) {
+    const box = this.page.getByPlaceholder('Search for products, brands and more');
+    await box.fill(query);
+    await box.press('Enter');
+    await expect(this.page.getByTestId('loader')).toBeHidden();
+  }
+
+  async resultCount(): Promise<number> {
+    return Number(((await this.page.getByTestId('results-count').textContent()) ?? '').replace(/[^0-9]/g, ''));
+  }
+
+  async productNames(): Promise<string[]> {
+    return this.cards.locator('.product-product').allInnerTexts();
+  }
+
+  async prices(): Promise<string[]> {
+    return this.cards.getByTestId('product-price').allTextContents();
+  }
+
+  async sortBy(value: 'price_asc' | 'price_desc' | 'rating' | 'discount') {
+    await this.page.getByLabel('Sort by').selectOption(value);
+    await expect(this.page.getByTestId('loader')).toBeHidden();
+    await expect(this.page.getByLabel('Sort by')).toHaveValue(value);
+  }
+
+  async openProduct(name: string) {
+    await this.cards.filter({ hasText: name }).click();
+  }
+}
+`,
+      "pages/product.page.ts": `import type { Page } from '@playwright/test';
+
+export class ProductPage {
+  readonly name;
+  readonly alert;
+  readonly bagCount;
+  constructor(private readonly page: Page) {
+    this.name = page.getByTestId('pdp-name');
+    this.alert = page.getByRole('alert');
+    this.bagCount = page.getByTestId('bag-count');
+  }
+
+  async addToBag() {
+    await this.page.getByRole('button', { name: 'ADD TO BAG' }).click();
+  }
+
+  async chooseSize(size: string) {
+    await this.page.getByRole('group', { name: 'Select size' }).getByRole('button', { name: size, exact: true }).click();
+  }
+}
+`,
+      "fixtures.ts": `import { test as base } from '@playwright/test';
+import { SearchPage } from './pages/search.page';
+import { ProductPage } from './pages/product.page';
+
+export const test = base.extend<{ search: SearchPage; product: ProductPage }>({
+  search: async ({ page }, use) => {
+    const search = new SearchPage(page);
+    await search.goto();
+    await use(search);
+  },
+  product: async ({ page }, use) => {
+    await use(new ProductPage(page));
+  },
+});
+
+export { expect } from '@playwright/test';
+`,
+      "tests/search.spec.ts": `import { test, expect } from '../fixtures';
+import { SEARCHES } from '../data/searches';
+import { parsePrice } from '../utils/money';
+
+test.describe('Search @regression', () => {
+  for (const row of SEARCHES) {
+    test(\`"\${row.query}" returns \${row.expectedCount} matching products\`, async ({ search }) => {
+      await search.search(row.query);
+      expect(await search.resultCount()).toBe(row.expectedCount);
+      for (const name of await search.productNames()) expect(name).toContain(row.mustContain);
+    });
+  }
+
+  test('results sort by price low to high', async ({ search }) => {
+    await search.search('shirt');
+    await search.sortBy('price_asc');
+    const prices = (await search.prices()).map(parsePrice);
+    expect(prices).toEqual([...prices].sort((a, b) => a - b));
+  });
+});
+`,
+      "tests/bag.spec.ts": `import { test, expect } from '../fixtures';
+
+test.describe('Bag @smoke', () => {
+  test('a size must be chosen before adding to the bag', async ({ search, product }) => {
+    await search.search('shirt');
+    await search.openProduct('Men Slim Fit Casual Shirt');
+    await expect(product.name).toHaveText('Men Slim Fit Casual Shirt');
+
+    await product.addToBag();
+    await expect(product.alert).toHaveText('Please select a size');
+
+    await product.chooseSize('M');
+    await product.addToBag();
+    await expect(product.bagCount).toHaveText('1');
+  });
+});
+`,
+    },
+    selenium: wsSelenium("TrendKart"),
+    notes: WS_NOTES,
+  }),
+  "workspace-saucedemo": withFiles({
+    files: {
+      "playwright.config.ts": wsConfig("https://www.saucedemo.com", "data-test"),
+      "README.md": wsReadme("Sauce Demo", "https://www.saucedemo.com"),
+      "data/users.ts": `export const users = {
+  standard: { username: 'standard_user', password: 'secret_sauce' },
+  locked: { username: 'locked_out_user', password: 'secret_sauce' },
+} as const;
+
+export const products = { backpack: 'Sauce Labs Backpack', bikeLight: 'Sauce Labs Bike Light' } as const;
+`,
+      "pages/login.page.ts": `import type { Page } from '@playwright/test';
+
+export class LoginPage {
+  readonly error;
+  constructor(private readonly page: Page) {
+    this.error = page.getByTestId('error');
+  }
+
+  async goto() {
+    await this.page.goto('/');
+  }
+
+  async login(username: string, password: string) {
+    await this.page.getByPlaceholder('Username').fill(username);
+    await this.page.getByPlaceholder('Password').fill(password);
+    await this.page.getByRole('button', { name: 'Login' }).click();
+  }
+}
+`,
+      "pages/inventory.page.ts": `import type { Page } from '@playwright/test';
+
+export class InventoryPage {
+  readonly title;
+  readonly items;
+  readonly badge;
+  constructor(private readonly page: Page) {
+    this.title = page.getByTestId('title');
+    this.items = page.getByTestId('inventory-item');
+    this.badge = page.getByTestId('shopping-cart-badge');
+  }
+
+  async addToCart(name: string) {
+    await this.items.filter({ hasText: name }).getByRole('button', { name: 'Add to cart' }).click();
+  }
+
+  async sortBy(value: 'az' | 'za' | 'lohi' | 'hilo') {
+    await this.page.getByTestId('product-sort-container').selectOption(value);
+  }
+
+  async prices(): Promise<number[]> {
+    return (await this.page.getByTestId('inventory-item-price').allTextContents()).map((t) => Number(t.replace('$', '')));
+  }
+
+  async openCart() {
+    await this.page.getByTestId('shopping-cart-link').click();
+  }
+}
+`,
+      "pages/cart.page.ts": `import type { Page } from '@playwright/test';
+
+export class CartPage {
+  readonly items;
+  readonly names;
+  constructor(page: Page) {
+    this.items = page.getByTestId('inventory-item');
+    this.names = page.getByTestId('inventory-item-name');
+  }
+}
+`,
+      "fixtures.ts": `import { test as base } from '@playwright/test';
+import { LoginPage } from './pages/login.page';
+import { InventoryPage } from './pages/inventory.page';
+import { CartPage } from './pages/cart.page';
+import { users } from './data/users';
+
+type Pages = { login: LoginPage; inventory: InventoryPage; cart: CartPage };
+
+export const test = base.extend<{ app: Pages; loggedIn: Pages }>({
+  app: async ({ page }, use) => {
+    const app = { login: new LoginPage(page), inventory: new InventoryPage(page), cart: new CartPage(page) };
+    await app.login.goto();
+    await use(app);
+  },
+  loggedIn: async ({ app, page }, use) => {
+    await app.login.login(users.standard.username, users.standard.password);
+    await page.waitForURL(/inventory\\.html/);
+    await use(app);
+  },
+});
+
+export { expect } from '@playwright/test';
+`,
+      "tests/login.spec.ts": `import { test, expect } from '../fixtures';
+import { users } from '../data/users';
+
+test.describe('Login @smoke', () => {
+  test('standard user lands on the products page', async ({ app }) => {
+    await app.login.login(users.standard.username, users.standard.password);
+    await expect(app.inventory.title).toHaveText('Products');
+    await expect(app.inventory.items).toHaveCount(6);
+  });
+
+  test('locked out user is told why', async ({ app }) => {
+    await app.login.login(users.locked.username, users.locked.password);
+    await expect(app.login.error).toContainText('locked out');
+  });
+});
+`,
+      "tests/shopping.spec.ts": `import { test, expect } from '../fixtures';
+import { products } from '../data/users';
+
+test.describe('Shopping @regression', () => {
+  test('two items added show in the badge and the cart', async ({ loggedIn: app }) => {
+    await app.inventory.addToCart(products.backpack);
+    await app.inventory.addToCart(products.bikeLight);
+    await expect(app.inventory.badge).toHaveText('2');
+    await app.inventory.openCart();
+    await expect(app.cart.names).toHaveText([products.backpack, products.bikeLight]);
+  });
+
+  test('sorting low to high orders prices ascending', async ({ loggedIn: app }) => {
+    await app.inventory.sortBy('lohi');
+    const prices = await app.inventory.prices();
+    expect(prices).toHaveLength(6);
+    expect(prices).toEqual([...prices].sort((a, b) => a - b));
+  });
+});
+`,
+    },
+    selenium: wsSelenium("SauceDemo"),
+    notes: [...WS_NOTES, "testIdAttribute: 'data-test' in the config is what makes getByTestId work on saucedemo.com. Interviewers like candidates who know that knob exists."],
+  }),
+  "workspace-orangehrm": withFiles({
+    files: {
+      "playwright.config.ts": wsConfig("https://opensource-demo.orangehrmlive.com", undefined, 60_000),
+      "README.md": wsReadme("OrangeHRM", "https://opensource-demo.orangehrmlive.com"),
+      "data/users.ts": `export const admin = { username: 'Admin', password: 'admin123' } as const;
+
+/** The demo database is shared with the whole internet: every name must be unique. */
+export const newEmployee = () => ({ first: 'Lab', last: 'User' + Date.now().toString().slice(-8) });
+`,
+      "pages/login.page.ts": `import type { Page } from '@playwright/test';
+
+export class LoginPage {
+  readonly error;
+  readonly dashboardHeading;
+  constructor(private readonly page: Page) {
+    this.error = page.getByText('Invalid credentials');
+    this.dashboardHeading = page.getByRole('heading', { name: 'Dashboard' });
+  }
+
+  async goto() {
+    await this.page.goto('/web/index.php/auth/login');
+  }
+
+  async login(username: string, password: string) {
+    await this.page.getByPlaceholder('Username').fill(username);
+    await this.page.getByPlaceholder('Password').fill(password);
+    await this.page.getByRole('button', { name: 'Login' }).click();
+  }
+}
+`,
+      "pages/pim.page.ts": `import { expect, type Page } from '@playwright/test';
+
+export class PimPage {
+  readonly employeeName;
+  constructor(private readonly page: Page) {
+    this.employeeName = page.locator('.orangehrm-edit-employee-name h6');
+  }
+
+  async gotoAddEmployee() {
+    await this.page.goto('/web/index.php/pim/addEmployee');
+    await expect(this.page.getByRole('heading', { name: 'Add Employee' })).toBeVisible();
+  }
+
+  async addEmployee(first: string, last: string) {
+    await this.page.locator('input[name="firstName"]').fill(first);
+    await this.page.locator('input[name="lastName"]').fill(last);
+    await this.page.getByRole('button', { name: 'Save' }).click();
+    await this.page.waitForURL(/viewPersonalDetails/, { timeout: 30_000 });
+    await expect(this.employeeName).not.toHaveText('');
+  }
+}
+`,
+      "fixtures.ts": `import { test as base } from '@playwright/test';
+import { LoginPage } from './pages/login.page';
+import { PimPage } from './pages/pim.page';
+import { admin } from './data/users';
+
+type Pages = { login: LoginPage; pim: PimPage };
+
+export const test = base.extend<{ app: Pages; adminApp: Pages }>({
+  app: async ({ page }, use) => {
+    const app = { login: new LoginPage(page), pim: new PimPage(page) };
+    await app.login.goto();
+    await use(app);
+  },
+  adminApp: async ({ app, page }, use) => {
+    await app.login.login(admin.username, admin.password);
+    await page.waitForURL(/\\/dashboard/);
+    await use(app);
+  },
+});
+
+export { expect } from '@playwright/test';
+`,
+      "tests/login.spec.ts": `import { test, expect } from '../fixtures';
+import { admin } from '../data/users';
+
+test.describe('Login @smoke', () => {
+  test('Admin can log in and sees the dashboard', async ({ app }) => {
+    await app.login.login(admin.username, admin.password);
+    await expect(app.login.dashboardHeading).toBeVisible();
+  });
+
+  test('wrong password shows Invalid credentials', async ({ app }) => {
+    await app.login.login(admin.username, 'wrong-password');
+    await expect(app.login.error).toBeVisible();
+  });
+});
+`,
+      "tests/pim.spec.ts": `import { test, expect } from '../fixtures';
+import { newEmployee } from '../data/users';
+
+test.describe('PIM @regression', () => {
+  test('a new employee appears on the personal details page', async ({ adminApp: app }) => {
+    const e = newEmployee();
+    await app.pim.gotoAddEmployee();
+    await app.pim.addEmployee(e.first, e.last);
+    await expect(app.pim.employeeName).toHaveText(\`\${e.first} \${e.last}\`);
+  });
+
+  test('the add employee form requires a first name', async ({ adminApp: app }) => {
+    await app.pim.gotoAddEmployee();
+    await app.pim.addEmployee('', 'NoFirstName').catch(() => undefined);
+    await expect(app.pim.employeeName).toHaveCount(0);
+  });
+});
+`,
+    },
+    selenium: wsSelenium("OrangeHRM"),
+    notes: [...WS_NOTES, "The demo is slow: timeout and expect.timeout are raised in the config instead of sprinkling waits in tests."],
+  }),
+  "workspace-automationexercise": withFiles({
+    files: {
+      "playwright.config.ts": wsConfig("https://automationexercise.com"),
+      "README.md": wsReadme("AutomationExercise", "https://automationexercise.com"),
+      "data/users.ts": `/** A fresh user for every run; the suite deletes it afterwards. */
+export const newUser = () => ({ name: 'QIR Learner', email: \`qir-\${Date.now()}@example.com\`, password: 'Secret123!' });
+`,
+      "utils/api.ts": `import type { APIResponse } from '@playwright/test';
+
+/** The API answers with text/html, so the body has to be parsed by hand. */
+export const json = async (res: APIResponse) => JSON.parse(await res.text());
+`,
+      "pages/products.page.ts": `import { expect, type Page } from '@playwright/test';
+
+export class ProductsPage {
+  readonly names;
+  constructor(private readonly page: Page) {
+    this.names = page.locator('.features_items .productinfo p');
+  }
+
+  async goto() {
+    await this.page.goto('/products');
+    await expect(this.page.locator('.features_items')).toBeVisible();
+  }
+
+  async search(term: string) {
+    await this.page.locator('#search_product').fill(term);
+    await this.page.locator('#submit_search').click();
+    await expect(this.page.getByRole('heading', { name: 'Searched Products' })).toBeVisible();
+  }
+
+  async addToCart(index: number) {
+    await this.page.locator('.productinfo a.add-to-cart').nth(index).click();
+    const modal = this.page.locator('#cartModal');
+    await expect(modal).toBeVisible();
+    await modal.getByRole('button', { name: 'Continue Shopping' }).click();
+    await expect(modal).toBeHidden();
+  }
+}
+`,
+      "pages/cart.page.ts": `import type { Page } from '@playwright/test';
+
+export class CartPage {
+  readonly rows;
+  constructor(private readonly page: Page) {
+    this.rows = page.locator('#cart_info_table tbody tr');
+  }
+
+  async goto() {
+    await this.page.goto('/view_cart');
+  }
+}
+`,
+      "fixtures.ts": `import { test as base } from '@playwright/test';
+import { ProductsPage } from './pages/products.page';
+import { CartPage } from './pages/cart.page';
+
+export const test = base.extend<{ products: ProductsPage; cart: CartPage }>({
+  products: async ({ page }, use) => {
+    const products = new ProductsPage(page);
+    await products.goto();
+    await use(products);
+  },
+  cart: async ({ page }, use) => {
+    await use(new CartPage(page));
+  },
+});
+
+export { expect } from '@playwright/test';
+`,
+      "tests/products.spec.ts": `import { test, expect } from '../fixtures';
+
+test.describe('Products @smoke', () => {
+  test('search results all match the term', async ({ products }) => {
+    await products.search('dress');
+    const names = await products.names.allTextContents();
+    expect(names.length).toBeGreaterThan(0);
+    for (const name of names) expect(name.toLowerCase()).toContain('dress');
+  });
+
+  test('adding two products puts two rows in the cart', async ({ products, cart }) => {
+    await products.addToCart(0);
+    await products.addToCart(1);
+    await cart.goto();
+    await expect(cart.rows).toHaveCount(2);
+  });
+});
+`,
+      "tests/api.spec.ts": `import { test, expect } from '../fixtures';
+import { json } from '../utils/api';
+
+test.describe('Products API @regression', () => {
+  test('GET productsList returns products', async ({ request }) => {
+    const body = await json(await request.get('/api/productsList'));
+    expect(body.responseCode).toBe(200);
+    expect(body.products.length).toBeGreaterThan(0);
+  });
+
+  test('POST verifyLogin without email is a 400', async ({ request }) => {
+    const body = await json(await request.post('/api/verifyLogin', { form: { password: 'x' } }));
+    expect(body.responseCode).toBe(400);
+    expect(body.message).toContain('email or password parameter is missing');
+  });
+});
+`,
+    },
+    selenium: wsSelenium("AutomationExercise"),
+    notes: [...WS_NOTES, "UI and API specs share one config and one fixtures file; the request fixture comes from Playwright itself."],
+  }),
 };

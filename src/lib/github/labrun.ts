@@ -56,8 +56,10 @@ export async function dispatchLabRun(u: GitHubUser, siteUrl: string, scenarioId:
       try {
         const cur = await gh<{ content?: string; encoding?: string }>(`/repos/${cfg.org}/${name}/contents/${f}`, token);
         const text = cur.content && cur.encoding === "base64" ? Buffer.from(cur.content.replace(/\n/g, ""), "base64").toString("utf8") : "";
-        // the config is ours, but a learner may have edited it: only replace it when it predates the reporter
-        if (f === "playwright.config.ts" ? !text.includes("lab-reporter") : text !== seed[f] && f === "lab-reporter.js") missing[f] = seed[f];
+        // the workflow and reporter are managed files: replace them when they differ from the current version.
+        // The root config is ours too, but a learner may have edited it: only replace it when it predates the reporter.
+        const stale = f === "playwright.config.ts" ? !text.includes("lab-reporter") : text !== seed[f];
+        if (stale) missing[f] = seed[f];
       } catch (e) {
         if (!(e instanceof GitHubError) || e.status !== 404) throw e;
         missing[f] = seed[f];
