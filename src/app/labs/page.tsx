@@ -4,6 +4,8 @@ import { LAB_APPS, isFramework, scenariosFor, SCENARIOS } from "@/lab/scenarios"
 import { hasPremium } from "@/lib/access";
 import { formatPrice } from "@/lib/config";
 import { LabPassedBadge, LabPassedCount } from "@/components/lab/LabPassedBadge";
+import { githubConfig } from "@/lib/github/app";
+import { getGitHubUser } from "@/lib/github/user";
 
 export const metadata: Metadata = {
   title: "Live automation labs",
@@ -11,8 +13,11 @@ export const metadata: Metadata = {
     "Real-time, scenario-based automation interview tasks. Write Playwright test code in the browser and watch it drive a shop, an HR portal and a fashion store live.",
 };
 
-export default async function LabsIndex() {
+export default async function LabsIndex({ searchParams }: { searchParams?: { github?: string } }) {
   const premium = await hasPremium();
+  const ghCfg = githubConfig();
+  const ghUser = ghCfg ? await getGitHubUser() : null;
+  const ghError = searchParams?.github === "failed" || searchParams?.github === "state" ? "GitHub sign-in didn't complete. Try again." : null;
   const freeCount = SCENARIOS.filter((s) => s.free).length;
   return (
     <div className="space-y-10">
@@ -44,6 +49,29 @@ export default async function LabsIndex() {
           </p>
         )}
       </section>
+
+      {ghCfg && (
+        <section className="card flex flex-wrap items-center gap-3 p-4 text-sm">
+          <span className="text-xl" aria-hidden>🐙</span>
+          {ghUser ? (
+            <p className="flex-1">
+              Signed in as <b>{ghUser.login}</b>. Every lab run is committed to{" "}
+              <a href={`https://github.com/${ghCfg.org}/lab-${ghUser.login.toLowerCase()}`} target="_blank" rel="noreferrer" className="font-mono accent hover:underline">
+                {ghCfg.org}/lab-{ghUser.login.toLowerCase()}
+              </a>
+              , a public repo in your name you can show in interviews.
+            </p>
+          ) : (
+            <>
+              <p className="flex-1">
+                <b>Build a portfolio while you practise.</b> Sign in with GitHub and every lab run is committed to a repo in your name under {ghCfg.org}.
+                {ghError && <span className="ml-2" style={{ color: "#e11d48" }}>{ghError}</span>}
+              </p>
+              <a href="/api/github/login?next=%2Flabs" className="btn btn-primary">Sign in with GitHub</a>
+            </>
+          )}
+        </section>
+      )}
 
       {LAB_APPS.map((app) => {
         const list = scenariosFor(app.id);

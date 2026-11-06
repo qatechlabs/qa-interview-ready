@@ -18,6 +18,18 @@ interface CheckRow {
 
 type Files = Record<string, string>;
 
+export interface GitHubState {
+  configured: boolean;
+  org: string;
+  user: { login: string; name: string; avatar: string } | null;
+}
+
+type CommitState =
+  | { status: "idle" }
+  | { status: "saving" }
+  | { status: "done"; url: string; sha: string; repoUrl: string; unchanged: boolean }
+  | { status: "error"; error: string };
+
 const SPEEDS = [
   { label: "Fast", ms: 0 },
   { label: "Normal", ms: 250 },
@@ -36,7 +48,7 @@ const sameFiles = (a: Files, b: Files) => {
   return ka.length === kb.length && ka.every((k) => a[k] === b[k]);
 };
 
-export function LabWorkbench({ id, solution }: { id: string; solution: SolutionView | null }) {
+export function LabWorkbench({ id, solution, github }: { id: string; solution: SolutionView | null; github?: GitHubState }) {
   const scenario = getScenario(id)!;
   const app = labApp(scenario.app);
   const framework = isFramework(scenario);
@@ -51,6 +63,8 @@ export function LabWorkbench({ id, solution }: { id: string; solution: SolutionV
   const [url, setUrl] = useState(app.base);
   const [showHints, setShowHints] = useState(false);
   const [solTab, setSolTab] = useState<"playwright" | "selenium" | null>(null);
+  const [commit, setCommit] = useState<CommitState>({ status: "idle" });
+  const lastCommitted = useRef<string>("");
   const frame = useRef<HTMLIFrameElement>(null);
   const signal = useRef({ aborted: false });
   const gutter = useRef<HTMLDivElement>(null);
@@ -128,6 +142,32 @@ export function LabWorkbench({ id, solution }: { id: string; solution: SolutionV
     });
   }, [clearAppState]);
 
+  const commitToGitHub = useCallback(
+    async (snapshot: Files, summary: string) => {
+      if (!github?.user) return;
+      const key = JSON.stringify(snapshot);
+      if (key === lastCommitted.current) return;
+      setCommit({ status: "saving" });
+      try {
+        const res = await fetch("/api/labs/commit", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ scenarioId: id, files: snapshot, summary }),
+        });
+        const data = (await res.json().catch(() => ({}))) as { error?: string; url?: string; sha?: string; repoUrl?: string; unchanged?: boolean };
+        if (!res.ok || !data.url) {
+          setCommit({ status: "error", error: data.error || `GitHub commit failed (${res.status})` });
+          return;
+        }
+        lastCommitted.current = key;
+        setCommit({ status: "done", url: data.url, sha: data.sha || "", repoUrl: data.repoUrl || "", unchanged: !!data.unchanged });
+      } catch {
+        setCommit({ status: "error", error: "Couldn't reach the server to commit." });
+      }
+    },
+    [github?.user, id],
+  );
+
   const run = useCallback(async () => {
     if (running) return;
     const f = frame.current;
@@ -197,7 +237,8 @@ export function LabWorkbench({ id, solution }: { id: string; solution: SolutionV
     });
     if (pass) markLabPassed(id);
     setRunning(false);
-  }, [running, files, app.base, speed, freshPage, scenario, id]);
+    void commitToGitHub(files, `${result.tests.filter((t) => t.ok).length}/${result.tests.length} tests passed${pass ? ", scenario passed" : ""}`);
+  }, [running, files, app.base, speed, freshPage, scenario, id, commitToGitHub]);
 
   const stop = () => {
     signal.current.aborted = true;
@@ -420,6 +461,42 @@ export function LabWorkbench({ id, solution }: { id: string; solution: SolutionV
             </p>
             <button onClick={download} className="btn btn-ghost !px-2.5 !py-1 text-xs">⬇ Download as Playwright project</button>
           </div>
+          {github?.configured && (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border px-3 py-2 text-xs" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
+              {github.user ? (
+                <>
+                  <span className="flex items-center gap-1.5 font-semibold">
+                    {/* eslint-disable-next-line @next/next/no-img-element -- avatar comes from GitHub's CDN */}
+                    {github.user.avatar && <img src={github.user.avatar} alt="" width={16} height={16} className="rounded-full" />}
+                    {github.user.login}
+                  </span>
+                  <span className="muted">
+                    Every run is committed to{" "}
+                    <a href={`https://github.com/${github.org}/lab-${github.user.login.toLowerCase()}`} target="_blank" rel="noreferrer" className="font-mono accent hover:underline">
+                      {github.org}/lab-{github.user.login.toLowerCase()}
+                    </a>
+                  </span>
+                  {commit.status === "saving" && <span className="chip" style={{ color: "var(--warn)" }}>● Committing…</span>}
+                  {commit.status === "done" && (
+                    <a href={commit.url} target="_blank" rel="noreferrer" className="chip hover:underline" style={{ color: "var(--good)" }}>
+                      ✓ {commit.unchanged ? "Already committed" : `Committed ${commit.sha.slice(0, 7)}`} ↗
+                    </a>
+                  )}
+                  {commit.status === "error" && <span className="chip" style={{ color: "#e11d48" }}>✗ {commit.error}</span>}
+                  <form action="/api/github/signout" method="post" className="ml-auto" onSubmit={async (e) => { e.preventDefault(); await fetch("/api/github/signout", { method: "POST" }); location.reload(); }}>
+                    <button className="muted hover:underline">Sign out</button>
+                  </form>
+                </>
+              ) : (
+                <>
+                  <span className="muted">Save your lab code to a GitHub repo in your name, automatically after every run.</span>
+                  <a href={`/api/github/login?next=${encodeURIComponent(`/labs/${id}`)}`} className="btn btn-ghost ml-auto !px-2.5 !py-1 text-xs">
+                    Sign in with GitHub
+                  </a>
+                </>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Right: live preview and results */}

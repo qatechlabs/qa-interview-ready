@@ -6,6 +6,8 @@ import { SOLUTIONS } from "@/lab/solutions";
 import { hasPremium } from "@/lib/access";
 import { formatPrice } from "@/lib/config";
 import { LabWorkbench } from "@/components/lab/LabWorkbench";
+import { githubConfig } from "@/lib/github/app";
+import { getGitHubUser } from "@/lib/github/user";
 
 export function generateMetadata({ params }: { params: { id: string } }): Metadata {
   const s = getScenario(params.id);
@@ -23,6 +25,9 @@ export default async function LabPage({ params }: { params: { id: string } }) {
   const app = labApp(s.app);
   const premium = await hasPremium();
   const locked = !s.free && !premium;
+  const ghCfg = githubConfig();
+  const ghUser = ghCfg ? await getGitHubUser() : null;
+  const github = { configured: !!ghCfg, org: ghCfg?.org || "", user: ghUser ? { login: ghUser.login, name: ghUser.name, avatar: ghUser.avatar } : null };
   const solution = locked ? null : SOLUTIONS[s.id] ?? null;
   const list = SCENARIOS.filter((x) => x.app === s.app);
   const idx = list.findIndex((x) => x.id === s.id);
@@ -79,7 +84,7 @@ export default async function LabPage({ params }: { params: { id: string } }) {
           </div>
         </div>
       ) : (
-        <LabWorkbench id={s.id} solution={solution} />
+        <LabWorkbench id={s.id} solution={solution} github={github} />
       )}
     </div>
   );
