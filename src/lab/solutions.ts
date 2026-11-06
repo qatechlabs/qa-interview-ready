@@ -43,7 +43,7 @@ import java.time.Duration;
 import java.util.*;
 
 public class ${name} {
-    static final String BASE = "https://interview.qatechlabs.com${base}";
+    static final String BASE = "${base.startsWith("http") ? base : `https://interview.qatechlabs.com${base}`}";
     WebDriver driver;
     WebDriverWait wait;
 
@@ -1353,4 +1353,726 @@ public class SearchTest {
       "TestNG's @DataProvider is the Java equivalent. Interviewers often ask you to compare the two.",
     ],
   }),
+  // ---------------- Real sites ----------------
+  "saucedemo-login": {
+    playwright:
+      pwHeader +
+      `test('standard user lands on the products page', async ({ page }) => {
+  await page.goto('/');
+  await page.getByPlaceholder('Username').fill('standard_user');
+  await page.getByPlaceholder('Password').fill('secret_sauce');
+  await page.getByRole('button', { name: 'Login' }).click();
+
+  await expect(page).toHaveURL(/inventory\\.html/);
+  await expect(page.getByTestId('title')).toHaveText('Products');
+  await expect(page.getByTestId('inventory-item')).toHaveCount(6);
+});
+
+test('locked out user sees an error', async ({ page }) => {
+  await page.goto('/');
+  await page.getByPlaceholder('Username').fill('locked_out_user');
+  await page.getByPlaceholder('Password').fill('secret_sauce');
+  await page.getByRole('button', { name: 'Login' }).click();
+
+  await expect(page.getByTestId('error')).toContainText('locked out');
+  await expect(page).toHaveURL(/saucedemo\\.com\\/?$/);
+});
+`,
+    selenium: javaClass(
+      "SauceDemoLoginTest",
+      "https://www.saucedemo.com",
+      `    private void login(String user) {
+        driver.get(BASE + "/");
+        driver.findElement(By.id("user-name")).sendKeys(user);
+        driver.findElement(By.id("password")).sendKeys("secret_sauce");
+        driver.findElement(By.id("login-button")).click();
+    }
+
+    @Test
+    public void standardUserLandsOnProducts() {
+        login("standard_user");
+        wait.until(ExpectedConditions.urlContains("/inventory.html"));
+        Assert.assertEquals(driver.findElement(By.cssSelector("[data-test=title]")).getText(), "Products");
+        Assert.assertEquals(driver.findElements(By.cssSelector("[data-test=inventory-item]")).size(), 6);
+    }
+
+    @Test
+    public void lockedOutUserSeesError() {
+        login("locked_out_user");
+        WebElement error = wait.until(ExpectedConditions.visibilityOfElementLocated(By.cssSelector("[data-test=error]")));
+        Assert.assertTrue(error.getText().contains("locked out"), error.getText());
+    }`,
+    ),
+    notes: [
+      "The locked-out test asserts the error text and that the URL did not change: a negative test proves both that the wrong thing didn't happen and that the right message appeared.",
+      "getByTestId maps to data-testid by default; Playwright's config here sets it to data-test, which is what Sauce Demo uses. Mention the config, interviewers notice.",
+      "On CI the run is identical to local: the project's playwright.config.ts gets the base URL from LAB_BASE_URL.",
+    ],
+  },
+  "saucedemo-pom-framework": withFiles({
+    files: {
+      "tests/shop.spec.ts": `import { test, expect } from '../fixtures';
+import { CartPage } from '../pages/cart.page';
+
+test('two items added show in the badge and the cart', async ({ inventory, page }) => {
+  await inventory.addToCart('Sauce Labs Backpack');
+  await inventory.addToCart('Sauce Labs Bike Light');
+  expect(await inventory.cartCount()).toBe(2);
+
+  await inventory.openCart();
+  const cart = new CartPage(page);
+  expect(await cart.itemNames()).toEqual(['Sauce Labs Backpack', 'Sauce Labs Bike Light']);
+});
+
+test('sorting low to high orders prices ascending', async ({ inventory }) => {
+  await inventory.sortBy('lohi');
+  const prices = await inventory.prices();
+  expect(prices).toHaveLength(6);
+  expect(prices).toEqual([...prices].sort((a, b) => a - b));
+});
+`,
+      "fixtures.ts": `import { test as base } from '@playwright/test';
+import { LoginPage } from './pages/login.page';
+import { InventoryPage } from './pages/inventory.page';
+
+export const test = base.extend<{ inventory: InventoryPage }>({
+  inventory: async ({ page }, use) => {
+    const login = new LoginPage(page);
+    await login.goto();
+    await login.login('standard_user', 'secret_sauce');
+    await use(new InventoryPage(page));
+  },
+});
+
+export { expect } from '@playwright/test';
+`,
+      "pages/login.page.ts": `import type { Page } from '@playwright/test';
+
+export class LoginPage {
+  constructor(private readonly page: Page) {}
+
+  async goto() {
+    await this.page.goto('/');
+  }
+
+  async login(username: string, password: string) {
+    await this.page.getByPlaceholder('Username').fill(username);
+    await this.page.getByPlaceholder('Password').fill(password);
+    await this.page.getByRole('button', { name: 'Login' }).click();
+    await this.page.waitForURL(/inventory\\.html/);
+  }
+}
+`,
+      "pages/inventory.page.ts": `import type { Page } from '@playwright/test';
+
+export class InventoryPage {
+  constructor(private readonly page: Page) {}
+
+  private card(productName: string) {
+    return this.page.locator('.inventory_item').filter({ hasText: productName });
+  }
+
+  async addToCart(productName: string) {
+    await this.card(productName).getByRole('button', { name: 'Add to cart' }).click();
+  }
+
+  async cartCount(): Promise<number> {
+    const badge = this.page.locator('.shopping_cart_badge');
+    return (await badge.count()) ? Number(await badge.textContent()) : 0;
+  }
+
+  async sortBy(value: 'az' | 'za' | 'lohi' | 'hilo') {
+    await this.page.locator('select[data-test="product-sort-container"]').selectOption(value);
+  }
+
+  async prices(): Promise<number[]> {
+    const texts = await this.page.locator('.inventory_item_price').allTextContents();
+    return texts.map((t) => Number(t.replace('$', '')));
+  }
+
+  async openCart() {
+    await this.page.locator('.shopping_cart_link').click();
+    await this.page.waitForURL(/cart\\.html/);
+  }
+}
+`,
+      "pages/cart.page.ts": `import type { Page } from '@playwright/test';
+
+export class CartPage {
+  constructor(private readonly page: Page) {}
+
+  async itemNames(): Promise<string[]> {
+    return this.page.locator('.cart_item .inventory_item_name').allTextContents();
+  }
+}
+`,
+    },
+    selenium: `// pages/LoginPage.java
+public class LoginPage {
+    private final WebDriver driver;
+    public LoginPage(WebDriver driver) { this.driver = driver; }
+    public void open() { driver.get("https://www.saucedemo.com/"); }
+    public InventoryPage login(String user, String password) {
+        driver.findElement(By.id("user-name")).sendKeys(user);
+        driver.findElement(By.id("password")).sendKeys(password);
+        driver.findElement(By.id("login-button")).click();
+        new WebDriverWait(driver, Duration.ofSeconds(10)).until(ExpectedConditions.urlContains("/inventory.html"));
+        return new InventoryPage(driver);
+    }
+}
+
+// pages/InventoryPage.java
+public class InventoryPage {
+    private final WebDriver driver;
+    public InventoryPage(WebDriver driver) { this.driver = driver; }
+    private WebElement card(String name) {
+        return driver.findElements(By.cssSelector(".inventory_item")).stream()
+            .filter(c -> c.getText().contains(name)).findFirst().orElseThrow();
+    }
+    public void addToCart(String name) { card(name).findElement(By.cssSelector("button")).click(); }
+    public int cartCount() {
+        List<WebElement> b = driver.findElements(By.cssSelector(".shopping_cart_badge"));
+        return b.isEmpty() ? 0 : Integer.parseInt(b.get(0).getText());
+    }
+    public void sortBy(String value) {
+        new Select(driver.findElement(By.cssSelector("select[data-test=product-sort-container]"))).selectByValue(value);
+    }
+    public List<Double> prices() {
+        return driver.findElements(By.cssSelector(".inventory_item_price")).stream()
+            .map(e -> Double.parseDouble(e.getText().replace("$", ""))).toList();
+    }
+    public CartPage openCart() { driver.findElement(By.cssSelector(".shopping_cart_link")).click(); return new CartPage(driver); }
+}
+
+// pages/CartPage.java
+public class CartPage {
+    private final WebDriver driver;
+    public CartPage(WebDriver driver) { this.driver = driver; }
+    public List<String> itemNames() {
+        return driver.findElements(By.cssSelector(".cart_item .inventory_item_name")).stream().map(WebElement::getText).toList();
+    }
+}
+
+// tests/BaseTest.java  (the fixture)
+public class BaseTest {
+    protected WebDriver driver;
+    protected InventoryPage inventory;
+    @BeforeMethod public void setUp() {
+        driver = new ChromeDriver();
+        LoginPage login = new LoginPage(driver);
+        login.open();
+        inventory = login.login("standard_user", "secret_sauce");
+    }
+    @AfterMethod public void tearDown() { driver.quit(); }
+}
+
+// tests/ShopTest.java
+public class ShopTest extends BaseTest {
+    @Test public void twoItemsShowInBadgeAndCart() {
+        inventory.addToCart("Sauce Labs Backpack");
+        inventory.addToCart("Sauce Labs Bike Light");
+        Assert.assertEquals(inventory.cartCount(), 2);
+        Assert.assertEquals(inventory.openCart().itemNames(), List.of("Sauce Labs Backpack", "Sauce Labs Bike Light"));
+    }
+    @Test public void sortLowToHighOrdersPrices() {
+        inventory.sortBy("lohi");
+        List<Double> prices = inventory.prices();
+        Assert.assertEquals(prices.size(), 6);
+        Assert.assertEquals(prices, prices.stream().sorted().toList());
+    }
+}
+`,
+    notes: [
+      "login() waits for the inventory URL before returning, so the fixture never hands over a half-loaded page. The wait belongs in the page object, not in every test.",
+      "card(name) scopes every action to one product card. Scoped locators survive the page being reordered, which is exactly what the sort test does.",
+      "cartCount() returns 0 when the badge is absent instead of throwing: a page object answers questions, it does not assert.",
+      "On GitHub Actions the same code runs with a real browser, which is the point: the framework you built in the browser is a real Playwright project.",
+    ],
+  }),
+  "orangehrm-login": {
+    playwright:
+      pwHeader +
+      `test('Admin can log in and sees the dashboard', async ({ page }) => {
+  await page.goto('/web/index.php/auth/login');
+  await page.getByPlaceholder('Username').fill('Admin');
+  await page.getByPlaceholder('Password').fill('admin123');
+  await page.getByRole('button', { name: 'Login' }).click();
+
+  await expect(page).toHaveURL(/\\/dashboard/);
+  await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible();
+});
+
+test('wrong password shows Invalid credentials', async ({ page }) => {
+  await page.goto('/web/index.php/auth/login');
+  await page.getByPlaceholder('Username').fill('Admin');
+  await page.getByPlaceholder('Password').fill('wrong-password');
+  await page.getByRole('button', { name: 'Login' }).click();
+
+  await expect(page.getByText('Invalid credentials')).toBeVisible();
+  await expect(page).toHaveURL(/auth\\/login/);
+});
+`,
+    selenium: javaClass(
+      "OrangeHrmLoginTest",
+      "https://opensource-demo.orangehrmlive.com",
+      `    private void login(String user, String password) {
+        driver.get(BASE + "/web/index.php/auth/login");
+        wait.until(ExpectedConditions.visibilityOfElementLocated(By.name("username"))).sendKeys(user);
+        driver.findElement(By.name("password")).sendKeys(password);
+        driver.findElement(By.cssSelector("button[type=submit]")).click();
+    }
+
+    @Test
+    public void adminSeesDashboard() {
+        login("Admin", "admin123");
+        wait.until(ExpectedConditions.urlContains("/dashboard"));
+        WebElement heading = wait.until(ExpectedConditions.visibilityOfElementLocated(By.xpath("//h6[text()='Dashboard']")));
+        Assert.assertTrue(heading.isDisplayed());
+    }
+
+    @Test
+    public void wrongPasswordShowsError() {
+        login("Admin", "wrong-password");
+        WebElement alert = wait.until(ExpectedConditions.visibilityOfElementLocated(By.cssSelector(".oxd-alert-content-text")));
+        Assert.assertEquals(alert.getText(), "Invalid credentials");
+        Assert.assertTrue(driver.getCurrentUrl().contains("auth/login"));
+    }`,
+    ),
+    notes: [
+      "The OrangeHRM demo renders the login form after a loader, so the first action must wait for the input: web-first assertions and auto-waiting do that; Thread.sleep does not.",
+      "The negative test asserts the message and that the URL stayed on the login page.",
+      "Role-based locators (heading named Dashboard, button named Login) survive the CSS class changes OrangeHRM makes between versions; .oxd-* classes are a last resort.",
+    ],
+  },
+  "orangehrm-pim-framework": withFiles({
+    files: {
+      "tests/employee.spec.ts": `import { test, expect } from '../fixtures';
+
+test('a new employee appears on the personal details page', async ({ pim }) => {
+  const first = 'Lab';
+  const last = 'User' + Date.now().toString().slice(-8);
+
+  await pim.addEmployee(first, last);
+
+  expect(await pim.employeeName()).toBe(first + ' ' + last);
+});
+`,
+      "fixtures.ts": `import { test as base } from '@playwright/test';
+import { LoginPage } from './pages/login.page';
+import { PimPage } from './pages/pim.page';
+
+export const test = base.extend<{ pim: PimPage }>({
+  pim: async ({ page }, use) => {
+    const login = new LoginPage(page);
+    await login.goto();
+    await login.login('Admin', 'admin123');
+    const pim = new PimPage(page);
+    await pim.gotoAddEmployee();
+    await use(pim);
+  },
+});
+
+export { expect } from '@playwright/test';
+`,
+      "pages/login.page.ts": `import type { Page } from '@playwright/test';
+
+export class LoginPage {
+  constructor(private readonly page: Page) {}
+
+  async goto() {
+    await this.page.goto('/web/index.php/auth/login');
+  }
+
+  async login(username: string, password: string) {
+    await this.page.getByPlaceholder('Username').fill(username);
+    await this.page.getByPlaceholder('Password').fill(password);
+    await this.page.getByRole('button', { name: 'Login' }).click();
+    await this.page.waitForURL(/\\/dashboard/);
+  }
+}
+`,
+      "pages/pim.page.ts": `import { expect, type Page } from '@playwright/test';
+
+export class PimPage {
+  constructor(private readonly page: Page) {}
+
+  async gotoAddEmployee() {
+    await this.page.goto('/web/index.php/pim/addEmployee');
+    await expect(this.page.getByRole('heading', { name: 'Add Employee' })).toBeVisible();
+  }
+
+  async addEmployee(firstName: string, lastName: string) {
+    await this.page.locator('input[name="firstName"]').fill(firstName);
+    await this.page.locator('input[name="lastName"]').fill(lastName);
+    await this.page.getByRole('button', { name: 'Save' }).click();
+    await this.page.waitForURL(/viewPersonalDetails/, { timeout: 30_000 });
+  }
+
+  async employeeName(): Promise<string> {
+    const heading = this.page.locator('.orangehrm-edit-employee-name h6');
+    await expect(heading).not.toHaveText('');
+    return (await heading.textContent())?.trim() ?? '';
+  }
+}
+`,
+    },
+    selenium: `// pages/PimPage.java
+public class PimPage {
+    private final WebDriver driver;
+    private final WebDriverWait wait;
+    public PimPage(WebDriver driver) {
+        this.driver = driver;
+        this.wait = new WebDriverWait(driver, Duration.ofSeconds(30));
+    }
+    public void openAddEmployee() {
+        driver.get("https://opensource-demo.orangehrmlive.com/web/index.php/pim/addEmployee");
+        wait.until(ExpectedConditions.visibilityOfElementLocated(By.name("firstName")));
+    }
+    public void addEmployee(String first, String last) {
+        driver.findElement(By.name("firstName")).sendKeys(first);
+        driver.findElement(By.name("lastName")).sendKeys(last);
+        driver.findElement(By.cssSelector("button[type=submit]")).click();
+        wait.until(ExpectedConditions.urlContains("viewPersonalDetails"));
+    }
+    public String employeeName() {
+        By heading = By.cssSelector(".orangehrm-edit-employee-name h6");
+        wait.until(d -> !d.findElement(heading).getText().isBlank());
+        return driver.findElement(heading).getText().trim();
+    }
+}
+
+// tests/BaseTest.java  (the fixture: logs in, opens Add Employee)
+public class BaseTest {
+    protected WebDriver driver;
+    protected PimPage pim;
+    @BeforeMethod public void setUp() {
+        driver = new ChromeDriver();
+        LoginPage login = new LoginPage(driver);   // same as in the login lab
+        login.open();
+        login.login("Admin", "admin123");
+        pim = new PimPage(driver);
+        pim.openAddEmployee();
+    }
+    @AfterMethod public void tearDown() { driver.quit(); }
+}
+
+// tests/EmployeeTest.java
+public class EmployeeTest extends BaseTest {
+    @Test public void newEmployeeShowsOnPersonalDetails() {
+        String first = "Lab";
+        String last = "User" + String.valueOf(System.currentTimeMillis()).substring(5);
+        pim.addEmployee(first, last);
+        Assert.assertEquals(pim.employeeName(), first + " " + last);
+    }
+}
+`,
+    notes: [
+      "Date.now() in the last name makes every run unique, so two learners (or two retries) never collide on the shared demo database.",
+      "The heading on the personal details page is filled asynchronously; employeeName() waits until it is non-empty before returning. Without that wait the test is flaky on a slow demo.",
+      "Fixtures do setup (login, navigate). Tests do actions and assertions. Keep the fixture free of assertions about the feature under test.",
+      "The demo resets regularly, so the test leaves its employee behind on purpose; in a real suite you'd delete it in the fixture's teardown after use().",
+    ],
+  }),
+  "automationexercise-signup": {
+    playwright:
+      pwHeader +
+      `const stamp = Date.now();
+const name = 'QIR Learner';
+const email = \`qir-\${stamp}@example.com\`;
+
+test('register a new user and delete the account', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('a[href="/login"]').click();
+
+  await page.locator('input[data-qa="signup-name"]').fill(name);
+  await page.locator('input[data-qa="signup-email"]').fill(email);
+  await page.locator('button[data-qa="signup-button"]').click();
+
+  await expect(page.getByText('Enter Account Information')).toBeVisible();
+  await page.locator('#id_gender1').check();
+  await page.locator('input[data-qa="password"]').fill('Secret123!');
+  await page.locator('select[data-qa="days"]').selectOption('10');
+  await page.locator('select[data-qa="months"]').selectOption('May');
+  await page.locator('select[data-qa="years"]').selectOption('1990');
+  await page.locator('input[data-qa="first_name"]').fill('QIR');
+  await page.locator('input[data-qa="last_name"]').fill('Learner');
+  await page.locator('input[data-qa="address"]').fill('1 Test Street');
+  await page.locator('select[data-qa="country"]').selectOption('India');
+  await page.locator('input[data-qa="state"]').fill('Telangana');
+  await page.locator('input[data-qa="city"]').fill('Hyderabad');
+  await page.locator('input[data-qa="zipcode"]').fill('500001');
+  await page.locator('input[data-qa="mobile_number"]').fill('9999999999');
+  await page.locator('button[data-qa="create-account"]').click();
+
+  await expect(page.locator('h2[data-qa="account-created"]')).toBeVisible();
+  await page.locator('a[data-qa="continue-button"]').click();
+  await expect(page.getByText(\`Logged in as \${name}\`)).toBeVisible();
+
+  await page.locator('a[href="/delete_account"]').click();
+  await expect(page.locator('h2[data-qa="account-deleted"]')).toBeVisible();
+});
+`,
+    selenium: javaClass(
+      "SignupTest",
+      "https://automationexercise.com",
+      `    @Test
+    public void registerAndDeleteAccount() {
+        String email = "qir-" + System.currentTimeMillis() + "@example.com";
+        driver.get(BASE + "/");
+        driver.findElement(By.cssSelector("a[href='/login']")).click();
+        driver.findElement(By.cssSelector("input[data-qa=signup-name]")).sendKeys("QIR Learner");
+        driver.findElement(By.cssSelector("input[data-qa=signup-email]")).sendKeys(email);
+        driver.findElement(By.cssSelector("button[data-qa=signup-button]")).click();
+
+        wait.until(ExpectedConditions.visibilityOfElementLocated(By.cssSelector("input[data-qa=password]")));
+        driver.findElement(By.id("id_gender1")).click();
+        driver.findElement(By.cssSelector("input[data-qa=password]")).sendKeys("Secret123!");
+        new Select(driver.findElement(By.cssSelector("select[data-qa=days]"))).selectByValue("10");
+        new Select(driver.findElement(By.cssSelector("select[data-qa=months]"))).selectByVisibleText("May");
+        new Select(driver.findElement(By.cssSelector("select[data-qa=years]"))).selectByValue("1990");
+        driver.findElement(By.cssSelector("input[data-qa=first_name]")).sendKeys("QIR");
+        driver.findElement(By.cssSelector("input[data-qa=last_name]")).sendKeys("Learner");
+        driver.findElement(By.cssSelector("input[data-qa=address]")).sendKeys("1 Test Street");
+        new Select(driver.findElement(By.cssSelector("select[data-qa=country]"))).selectByVisibleText("India");
+        driver.findElement(By.cssSelector("input[data-qa=state]")).sendKeys("Telangana");
+        driver.findElement(By.cssSelector("input[data-qa=city]")).sendKeys("Hyderabad");
+        driver.findElement(By.cssSelector("input[data-qa=zipcode]")).sendKeys("500001");
+        driver.findElement(By.cssSelector("input[data-qa=mobile_number]")).sendKeys("9999999999");
+        driver.findElement(By.cssSelector("button[data-qa=create-account]")).click();
+
+        Assert.assertTrue(wait.until(ExpectedConditions.visibilityOfElementLocated(By.cssSelector("h2[data-qa=account-created]"))).isDisplayed());
+        driver.findElement(By.cssSelector("a[data-qa=continue-button]")).click();
+        Assert.assertTrue(driver.findElement(By.xpath("//a[contains(.,'Logged in as')]")).isDisplayed());
+
+        driver.findElement(By.cssSelector("a[href='/delete_account']")).click();
+        Assert.assertTrue(wait.until(ExpectedConditions.visibilityOfElementLocated(By.cssSelector("h2[data-qa=account-deleted]"))).isDisplayed());
+    }`,
+    ),
+    notes: [
+      "A unique email per run makes the test repeatable; deleting the account at the end keeps the site clean and proves the full lifecycle.",
+      "data-qa attributes are the site's stable test hooks. Prefer them over text, which the site translates and restyles.",
+      "Three assertions mark the three state changes: created, logged in, deleted. Each one is where a bug would show up.",
+      "Ads on this site sometimes cover elements. Playwright's actionability checks retry; if an ad iframe steals the click, scope locators and avoid force: true.",
+    ],
+  },
+  "automationexercise-products-framework": withFiles({
+    files: {
+      "tests/products.spec.ts": `import { test, expect } from '@playwright/test';
+import { ProductsPage } from '../pages/products.page';
+import { CartPage } from '../pages/cart.page';
+
+test('search results all match the term', async ({ page }) => {
+  const products = new ProductsPage(page);
+  await products.goto();
+  await products.search('dress');
+
+  const names = await products.productNames();
+  expect(names.length).toBeGreaterThan(0);
+  for (const name of names) {
+    expect(name.toLowerCase()).toContain('dress');
+  }
+});
+
+test('adding two products puts two rows in the cart', async ({ page }) => {
+  const products = new ProductsPage(page);
+  await products.goto();
+  await products.addToCart(0);
+  await products.addToCart(1);
+
+  const cart = new CartPage(page);
+  await cart.goto();
+  expect(await cart.rowCount()).toBe(2);
+});
+`,
+      "pages/products.page.ts": `import { expect, type Page } from '@playwright/test';
+
+export class ProductsPage {
+  constructor(private readonly page: Page) {}
+
+  async goto() {
+    await this.page.goto('/products');
+    await expect(this.page.locator('.features_items')).toBeVisible();
+  }
+
+  async search(term: string) {
+    await this.page.locator('#search_product').fill(term);
+    await this.page.locator('#submit_search').click();
+    await expect(this.page.getByRole('heading', { name: 'Searched Products' })).toBeVisible();
+  }
+
+  async productNames(): Promise<string[]> {
+    return this.page.locator('.features_items .productinfo p').allTextContents();
+  }
+
+  async addToCart(index: number) {
+    await this.page.locator('.productinfo a.add-to-cart').nth(index).click();
+    const modal = this.page.locator('#cartModal');
+    await expect(modal).toBeVisible();
+    await modal.getByRole('button', { name: 'Continue Shopping' }).click();
+    await expect(modal).toBeHidden();
+  }
+}
+`,
+      "pages/cart.page.ts": `import type { Page } from '@playwright/test';
+
+export class CartPage {
+  constructor(private readonly page: Page) {}
+
+  async goto() {
+    await this.page.goto('/view_cart');
+  }
+
+  async rowCount(): Promise<number> {
+    return this.page.locator('#cart_info_table tbody tr').count();
+  }
+}
+`,
+    },
+    selenium: `// pages/ProductsPage.java
+public class ProductsPage {
+    private final WebDriver driver;
+    private final WebDriverWait wait;
+    public ProductsPage(WebDriver driver) { this.driver = driver; this.wait = new WebDriverWait(driver, Duration.ofSeconds(15)); }
+    public void open() { driver.get("https://automationexercise.com/products"); }
+    public void search(String term) {
+        driver.findElement(By.id("search_product")).sendKeys(term);
+        driver.findElement(By.id("submit_search")).click();
+        wait.until(ExpectedConditions.visibilityOfElementLocated(By.xpath("//h2[contains(.,'Searched Products')]")));
+    }
+    public List<String> productNames() {
+        return driver.findElements(By.cssSelector(".features_items .productinfo p")).stream().map(WebElement::getText).toList();
+    }
+    public void addToCart(int index) {
+        WebElement button = driver.findElements(By.cssSelector(".productinfo a.add-to-cart")).get(index);
+        ((JavascriptExecutor) driver).executeScript("arguments[0].scrollIntoView({block:'center'})", button);
+        button.click();
+        WebElement modal = wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("cartModal")));
+        modal.findElement(By.cssSelector("button.close-modal")).click();
+        wait.until(ExpectedConditions.invisibilityOf(modal));
+    }
+}
+
+// pages/CartPage.java
+public class CartPage {
+    private final WebDriver driver;
+    public CartPage(WebDriver driver) { this.driver = driver; }
+    public void open() { driver.get("https://automationexercise.com/view_cart"); }
+    public int rowCount() { return driver.findElements(By.cssSelector("#cart_info_table tbody tr")).size(); }
+}
+
+// tests/ProductsTest.java
+public class ProductsTest {
+    WebDriver driver;
+    @BeforeMethod public void setUp() { driver = new ChromeDriver(); }
+    @AfterMethod public void tearDown() { driver.quit(); }
+
+    @Test public void searchResultsMatchTerm() {
+        ProductsPage products = new ProductsPage(driver);
+        products.open();
+        products.search("dress");
+        List<String> names = products.productNames();
+        Assert.assertFalse(names.isEmpty());
+        for (String n : names) Assert.assertTrue(n.toLowerCase().contains("dress"), n);
+    }
+
+    @Test public void twoProductsMakeTwoCartRows() {
+        ProductsPage products = new ProductsPage(driver);
+        products.open();
+        products.addToCart(0);
+        products.addToCart(1);
+        CartPage cart = new CartPage(driver);
+        cart.open();
+        Assert.assertEquals(cart.rowCount(), 2);
+    }
+}
+`,
+    notes: [
+      "addToCart() owns the modal: click, wait for it, close it, wait for it to go. The test never knows a modal exists, which is what a page object is for.",
+      "Looping over every result with expect inside the loop fails on the first mismatch and names it. Checking only the first result is the classic interview trap.",
+      "goto() and search() end with a visibility wait on the thing the next step needs, so the page objects compose safely.",
+    ],
+  }),
+  "automationexercise-api": {
+    playwright:
+      pwHeader +
+      `// The API answers with content-type text/html, so parse the body yourself.
+const json = async (res: { text(): Promise<string> }) => JSON.parse(await res.text());
+
+test('GET productsList returns products', async ({ request }) => {
+  const res = await request.get('/api/productsList');
+  expect(res.status()).toBe(200);
+  const body = await json(res);
+  expect(body.responseCode).toBe(200);
+  expect(Array.isArray(body.products)).toBe(true);
+  expect(body.products.length).toBeGreaterThan(0);
+  expect(body.products[0]).toHaveProperty('name');
+});
+
+test('POST searchProduct filters by name', async ({ request }) => {
+  const res = await request.post('/api/searchProduct', { form: { search_product: 'tshirt' } });
+  const body = await json(res);
+  expect(body.responseCode).toBe(200);
+  expect(body.products.length).toBeGreaterThan(0);
+  for (const p of body.products) {
+    expect(p.name.toLowerCase()).toContain('shirt');
+  }
+});
+
+test('POST verifyLogin without email is a 400', async ({ request }) => {
+  const res = await request.post('/api/verifyLogin', { form: { password: 'x' } });
+  const body = await json(res);
+  expect(body.responseCode).toBe(400);
+  expect(body.message).toContain('email or password parameter is missing');
+});
+`,
+    selenium: `// REST Assured + TestNG equivalent (pom.xml: io.rest-assured:rest-assured)
+import io.restassured.RestAssured;
+import io.restassured.response.Response;
+import org.testng.Assert;
+import org.testng.annotations.*;
+import static io.restassured.RestAssured.given;
+
+public class ProductsApiTest {
+    @BeforeClass
+    public void setUp() {
+        RestAssured.baseURI = "https://automationexercise.com";
+    }
+
+    @Test
+    public void productsListReturnsProducts() {
+        Response res = given().get("/api/productsList");
+        Assert.assertEquals(res.statusCode(), 200);
+        // content-type is text/html, so force JSON parsing
+        var body = new com.google.gson.JsonParser().parse(res.asString()).getAsJsonObject();
+        Assert.assertEquals(body.get("responseCode").getAsInt(), 200);
+        Assert.assertTrue(body.getAsJsonArray("products").size() > 0);
+    }
+
+    @Test
+    public void searchProductFiltersByName() {
+        Response res = given().formParam("search_product", "tshirt").post("/api/searchProduct");
+        var body = new com.google.gson.JsonParser().parse(res.asString()).getAsJsonObject();
+        Assert.assertEquals(body.get("responseCode").getAsInt(), 200);
+        for (var p : body.getAsJsonArray("products")) {
+            String name = p.getAsJsonObject().get("name").getAsString().toLowerCase();
+            Assert.assertTrue(name.contains("shirt"), name);
+        }
+    }
+
+    @Test
+    public void verifyLoginWithoutEmailIs400() {
+        Response res = given().formParam("password", "x").post("/api/verifyLogin");
+        var body = new com.google.gson.JsonParser().parse(res.asString()).getAsJsonObject();
+        Assert.assertEquals(body.get("responseCode").getAsInt(), 400);
+        Assert.assertTrue(body.get("message").getAsString().contains("email or password parameter is missing"));
+    }
+}
+`,
+    notes: [
+      "This API returns HTTP 200 for everything and puts the real status in responseCode. Say so out loud in the interview: it shows you read responses instead of assuming.",
+      "res.json() would throw on text/html; parsing the text yourself is the fix, wrapped in one helper so the tests stay readable.",
+      "The request fixture shares baseURL with the browser tests, so the same playwright.config.ts serves UI and API suites.",
+      "Three layers of assertion: transport status, API status code, and the shape and content of the data.",
+    ],
+  },
 };

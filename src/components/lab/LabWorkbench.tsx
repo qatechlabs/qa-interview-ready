@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getScenario, isFramework, labApp, MAIN_FILE, starterFiles } from "@/lab/scenarios";
+import { getScenario, isFramework, isRemote, labApp, MAIN_FILE, starterFiles } from "@/lab/scenarios";
 import type { LogEntry, RunResult } from "@/lib/lab/runtime";
 import { markLabPassed } from "@/lib/lab/progress";
 
@@ -52,6 +52,7 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
   const scenario = getScenario(id)!;
   const app = labApp(scenario.app);
   const framework = isFramework(scenario);
+  const remote = isRemote(scenario);
   const starter = useMemo(() => starterFiles(scenario), [scenario]);
   const [files, setFiles] = useState<Files>(starter);
   const [active, setActive] = useState<string>(() => sortPaths(starter).find((p) => p.startsWith("tests/")) || sortPaths(starter)[0]);
@@ -64,6 +65,7 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
   const [showHints, setShowHints] = useState(false);
   const [solTab, setSolTab] = useState<"playwright" | "selenium" | null>(null);
   const [commit, setCommit] = useState<CommitState>({ status: "idle" });
+  const [runUrl, setRunUrl] = useState<string>("");
   const lastCommitted = useRef<string>("");
   const frame = useRef<HTMLIFrameElement>(null);
   const signal = useRef({ aborted: false });
@@ -168,8 +170,124 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
     [github?.user, id],
   );
 
+  const finish = useCallback(
+    (result: RunResult, push: (e: LogEntry) => void, extra: { lab: unknown; url: string; doc: Document | null }) => {
+      const allCode = Object.values(files).join("\n");
+      const ctx = { ...extra, result, code: allCode, files };
+      const rows: CheckRow[] = [
+        { label: "Your tests ran without errors", ok: result.ok },
+        {
+          label: `At least ${scenario.minAssertions} passing assertion${scenario.minAssertions === 1 ? "" : "s"}`,
+          // -1 means the report carried no assertion steps; then count expect() calls in a passing run
+          ok: (result.assertions.passed >= 0 ? result.assertions.passed : result.ok ? (allCode.match(/\bexpect\s*\(/g) || []).length : 0) >= scenario.minAssertions,
+        },
+        ...scenario.checks.map((c) => {
+          let ok = false;
+          try {
+            ok = !!c.test(ctx);
+          } catch {
+            ok = false;
+          }
+          return { label: c.label, ok };
+        }),
+      ];
+      const pass = rows.every((r) => r.ok);
+      setChecks(rows);
+      setVerdict(pass ? "pass" : "fail");
+      const passedTests = result.tests.filter((t) => t.ok).length;
+      push({
+        kind: pass ? "pass" : "info",
+        text:
+          result.assertions.passed >= 0
+            ? `${passedTests}/${result.tests.length} tests passed · ${result.assertions.passed} assertion${result.assertions.passed === 1 ? "" : "s"} passed, ${result.assertions.failed} failed · ${(result.durationMs / 1000).toFixed(1)}s`
+            : `${passedTests}/${result.tests.length} tests passed · ${(result.durationMs / 1000).toFixed(1)}s`,
+      });
+      if (pass) markLabPassed(id);
+      return { pass, passedTests };
+    },
+    [files, scenario, id],
+  );
+
+  /** Real-site labs: commit, dispatch the workflow in the learner's repo, poll until it completes. */
+  const runRemote = useCallback(async () => {
+    if (running || !github?.user) return;
+    setRunning(true);
+    setChecks(null);
+    setVerdict(null);
+    setRunUrl("");
+    const entries: LogEntry[] = [];
+    const push = (e: LogEntry) => {
+      entries.push(e);
+      setLog([...entries]);
+    };
+    setLog([]);
+    signal.current = { aborted: false };
+    const mySignal = signal.current;
+    const snapshot = files;
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    try {
+      push({ kind: "info", text: `Committing to ${github.org}/lab-${github.user.login.toLowerCase()} and starting the Lab run workflow…` });
+      setCommit({ status: "saving" });
+      const res = await fetch("/api/labs/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ scenarioId: id, files: snapshot }) });
+      const d = (await res.json().catch(() => ({}))) as { error?: string; sha?: string; dispatchedAt?: string; commitUrl?: string; commitUnchanged?: boolean; repoUrl?: string; actionsUrl?: string };
+      if (!res.ok || !d.sha || !d.dispatchedAt) {
+        setCommit({ status: "error", error: d.error || `Couldn't start the run (${res.status})` });
+        push({ kind: "error", text: d.error || `Couldn't start the run (${res.status})` });
+        return;
+      }
+      lastCommitted.current = JSON.stringify(snapshot);
+      setCommit({ status: "done", url: d.commitUrl || "", sha: d.sha, repoUrl: d.repoUrl || "", unchanged: !!d.commitUnchanged });
+      push({ kind: "step", text: `Committed ${d.sha.slice(0, 7)} · workflow dispatched on GitHub Actions` });
+      if (d.actionsUrl) setRunUrl(d.actionsUrl);
+      const started = Date.now();
+      let last = "";
+      while (!mySignal.aborted && Date.now() - started < 20 * 60_000) {
+        await sleep(last ? 6000 : 4000);
+        if (mySignal.aborted) break;
+        const st = await fetch(`/api/labs/run?sha=${d.sha}&since=${encodeURIComponent(d.dispatchedAt)}`, { cache: "no-store" });
+        const r = (await st.json().catch(() => ({}))) as { error?: string; status?: string; runUrl?: string; conclusion?: string | null; tests?: { name: string; ok: boolean; error?: string; durationMs: number }[]; assertions?: { passed: number; failed: number; matchers: string[] }; durationMs?: number };
+        if (!st.ok) {
+          push({ kind: "error", text: r.error || `Couldn't read the run (${st.status})` });
+          return;
+        }
+        if (r.runUrl) setRunUrl(r.runUrl);
+        const secs = Math.round((Date.now() - started) / 1000);
+        if (r.status !== last) {
+          last = r.status || "";
+          if (r.status === "pending" || r.status === "queued") push({ kind: "info", text: "Waiting for a GitHub Actions runner… (usually under a minute)" });
+          if (r.status === "in_progress") push({ kind: "info", text: "Running: installing Playwright and Chromium, then your tests. Usually 1–3 minutes." });
+        }
+        if (r.status !== "completed") continue;
+        push({ kind: "info", text: `Workflow ${r.conclusion || "finished"} after ${secs}s` });
+        for (const t of r.tests || []) {
+          push({ kind: "test", text: t.name });
+          push(t.ok ? { kind: "pass", text: `passed`, ms: t.durationMs } : { kind: "fail", text: t.error || "failed", ms: t.durationMs });
+        }
+        if (r.error) push({ kind: "error", text: r.error });
+        const tests = (r.tests || []).map((t) => ({ name: t.name, ok: t.ok, error: t.error }));
+        const result: RunResult = {
+          ok: !r.error && tests.length > 0 && tests.every((t) => t.ok),
+          error: r.error,
+          assertions: r.assertions || { passed: -1, failed: 0, matchers: [] },
+          tests,
+          durationMs: r.durationMs || Date.now() - started,
+        };
+        if (!tests.length && !r.error) push({ kind: "error", text: "No tests were found. Test files must be named *.spec.ts." });
+        finish(result, push, { lab: null, url: "", doc: null });
+        return;
+      }
+      if (mySignal.aborted) push({ kind: "info", text: "Stopped watching. The run continues on GitHub; open it from the link above." });
+      else push({ kind: "error", text: "Gave up waiting after 20 minutes. Open the run on GitHub to see what happened." });
+    } catch (e) {
+      push({ kind: "error", text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setRunning(false);
+    }
+  }, [running, github, files, id, finish]);
+
   const run = useCallback(async () => {
     if (running) return;
+    if (remote) return runRemote();
     const f = frame.current;
     if (!f) return;
     setRunning(true);
@@ -213,32 +331,10 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
     } catch {
       /* ignore */
     }
-    const allCode = Object.values(files).join("\n");
-    const ctx = { lab, result, code: allCode, files, url: pageUrl, doc: f.contentDocument };
-    const rows: CheckRow[] = [
-      { label: "Your tests ran without errors", ok: result.ok },
-      { label: `At least ${scenario.minAssertions} passing assertion${scenario.minAssertions === 1 ? "" : "s"}`, ok: result.assertions.passed >= scenario.minAssertions },
-      ...scenario.checks.map((c) => {
-        let ok = false;
-        try {
-          ok = !!c.test(ctx);
-        } catch {
-          ok = false;
-        }
-        return { label: c.label, ok };
-      }),
-    ];
-    const pass = rows.every((r) => r.ok);
-    setChecks(rows);
-    setVerdict(pass ? "pass" : "fail");
-    push({
-      kind: pass ? "pass" : "info",
-      text: `${result.tests.filter((t) => t.ok).length}/${result.tests.length} tests passed · ${result.assertions.passed} assertion${result.assertions.passed === 1 ? "" : "s"} passed, ${result.assertions.failed} failed · ${(result.durationMs / 1000).toFixed(1)}s`,
-    });
-    if (pass) markLabPassed(id);
+    const { pass, passedTests } = finish(result, push, { lab, url: pageUrl, doc: f.contentDocument });
     setRunning(false);
-    void commitToGitHub(files, `${result.tests.filter((t) => t.ok).length}/${result.tests.length} tests passed${pass ? ", scenario passed" : ""}`);
-  }, [running, files, app.base, speed, freshPage, scenario, id, commitToGitHub]);
+    void commitToGitHub(files, `${passedTests}/${result.tests.length} tests passed${pass ? ", scenario passed" : ""}`);
+  }, [running, remote, runRemote, files, app.base, speed, freshPage, finish, commitToGitHub]);
 
   const stop = () => {
     signal.current.aborted = true;
@@ -340,7 +436,7 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
     const origin = typeof location !== "undefined" ? location.origin : "https://interview.qatechlabs.com";
     const project = projectFiles(framework ? files : { [MAIN_FILE]: files[MAIN_FILE] ?? Object.values(files)[0] }, {
       name: `qa-lab-${scenario.id}`,
-      baseURL: origin + app.base,
+      baseURL: remote ? app.base : origin + app.base,
       title: scenario.title,
     });
     const blob = makeZip(project);
@@ -382,17 +478,25 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
               <span className="truncate text-xs font-semibold" title={active}>{active}</span>
               <span className="chip">Playwright · TypeScript</span>
               <div className="ml-auto flex items-center gap-1.5">
-                <label className="sr-only" htmlFor="lab-speed">Speed</label>
-                <select id="lab-speed" value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="rounded-md border px-1.5 py-1 text-xs" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
-                  {SPEEDS.map((s) => (
-                    <option key={s.ms} value={s.ms}>{s.label}</option>
-                  ))}
-                </select>
+                {!remote && (
+                  <>
+                    <label className="sr-only" htmlFor="lab-speed">Speed</label>
+                    <select id="lab-speed" value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="rounded-md border px-1.5 py-1 text-xs" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
+                      {SPEEDS.map((s) => (
+                        <option key={s.ms} value={s.ms}>{s.label}</option>
+                      ))}
+                    </select>
+                  </>
+                )}
                 <button onClick={resetCode} className="btn btn-ghost !px-2.5 !py-1 text-xs" disabled={running}>Reset</button>
                 {running ? (
                   <button onClick={stop} className="btn !px-3 !py-1 text-xs" style={{ background: "#e11d48", color: "#fff" }}>■ Stop</button>
+                ) : remote && !github?.user ? (
+                  <a href={`/api/github/login?next=${encodeURIComponent(`/labs/${id}`)}`} className="btn btn-primary !px-3 !py-1 text-xs" title="Real-site labs run on GitHub Actions in your repo">
+                    Sign in with GitHub to run
+                  </a>
                 ) : (
-                  <button onClick={run} className="btn btn-primary !px-3 !py-1 text-xs" title="Ctrl/⌘ + Enter">▶ Run tests</button>
+                  <button onClick={run} className="btn btn-primary !px-3 !py-1 text-xs" title="Ctrl/⌘ + Enter">{remote ? "▶ Run on GitHub" : "▶ Run tests"}</button>
                 )}
               </div>
             </div>
@@ -455,10 +559,17 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
             </div>
           </section>
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs muted">
-            <p>
-              Runs in your browser with a Playwright-compatible API: locators, auto-waiting actions, <code className="inline-code">expect</code>, imports between files and{" "}
-              <code className="inline-code">test.extend</code> fixtures. Saved in this browser. Ctrl/⌘ + Enter runs.
-            </p>
+            {remote ? (
+              <p>
+                Runs with real Playwright on GitHub Actions in your own repo: the files are committed, the <b>Lab run</b> workflow starts with{" "}
+                <code className="inline-code">LAB_BASE_URL={app.base}</code>, and the results come back here. Saved in this browser. Ctrl/⌘ + Enter runs.
+              </p>
+            ) : (
+              <p>
+                Runs in your browser with a Playwright-compatible API: locators, auto-waiting actions, <code className="inline-code">expect</code>, imports between files and{" "}
+                <code className="inline-code">test.extend</code> fixtures. Saved in this browser. Ctrl/⌘ + Enter runs.
+              </p>
+            )}
             <button onClick={download} className="btn btn-ghost !px-2.5 !py-1 text-xs">⬇ Download as Playwright project</button>
           </div>
           {github?.configured && (
@@ -489,7 +600,7 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
                 </>
               ) : (
                 <>
-                  <span className="muted">Save your lab code to a GitHub repo in your name, automatically after every run.</span>
+                  <span className="muted">{remote ? "Real-site labs run on GitHub Actions in a repo created in your name. Sign in to run." : "Save your lab code to a GitHub repo in your name, automatically after every run."}</span>
                   <a href={`/api/github/login?next=${encodeURIComponent(`/labs/${id}`)}`} className="btn btn-ghost ml-auto !px-2.5 !py-1 text-xs">
                     Sign in with GitHub
                   </a>
@@ -501,6 +612,40 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
 
         {/* Right: live preview and results */}
         <div className="min-w-0 space-y-4 lg:sticky lg:top-20 lg:self-start">
+          {remote ? (
+            <section className="card p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-sm font-semibold">
+                  <span aria-hidden>{app.icon}</span> {app.name}
+                </h2>
+                <span className="chip">Real site · runs on GitHub Actions</span>
+                {running && <span className="chip" style={{ color: "var(--warn)" }}>● Running</span>}
+                <a href={app.base} target="_blank" rel="noreferrer" className="ml-auto text-xs font-semibold accent hover:underline">Open the site ↗</a>
+              </div>
+              <p className="mt-2 text-sm muted">
+                {app.base} can&apos;t be embedded here, so your code runs with real Playwright and Chromium on a GitHub Actions runner in your repo. Explore the site in a
+                new tab while you write the test. Login: {app.credentials}.
+              </p>
+              <ol className="mt-3 grid gap-2 text-xs sm:grid-cols-3">
+                {[
+                  ["1", "Commit", "Your files go to labs/" + scenario.id + "/ in your repo."],
+                  ["2", "Run", "The Lab run workflow installs Playwright and runs your spec against the real site."],
+                  ["3", "Verify", "Results, assertion steps and the HTML report come back; the checks grade your code."],
+                ].map(([n, t, d]) => (
+                  <li key={n} className="rounded-lg p-2" style={{ background: "var(--surface-2)" }}>
+                    <span className="font-semibold">{n}. {t}</span>
+                    <p className="muted">{d}</p>
+                  </li>
+                ))}
+              </ol>
+              {runUrl && (
+                <p className="mt-3 text-xs">
+                  <a href={runUrl} target="_blank" rel="noreferrer" className="font-semibold accent hover:underline">Open the run on GitHub ↗</a>
+                  <span className="muted"> · HTML report and traces are in the run&apos;s artifacts for 7 days.</span>
+                </p>
+              )}
+            </section>
+          ) : (
           <section className="overflow-hidden rounded-xl border" style={{ borderColor: "var(--border)" }}>
             <div className="flex items-center gap-2 border-b px-3 py-2" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
               <span className="flex gap-1" aria-hidden>
@@ -517,6 +662,7 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
             </div>
             <iframe ref={frame} src={app.base} title={`${app.name} practice app`} className="block h-[420px] w-full bg-white" />
           </section>
+          )}
 
           <section className="card p-4" aria-live="polite">
             <div className="mb-2 flex items-center justify-between">
@@ -525,7 +671,7 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
               {verdict === "fail" && <span className="chip" style={{ color: "#e11d48" }}>✗ Not yet</span>}
             </div>
             <div className="max-h-56 overflow-auto rounded-lg p-2 font-mono text-[12px] leading-relaxed" style={{ background: "var(--surface-2)" }}>
-              {!log.length && <p className="muted">Press Run tests to watch your code drive the practice app in the preview.</p>}
+              {!log.length && <p className="muted">{remote ? "Press Run on GitHub to commit your code and run it against the real site. Results appear here in a few minutes." : "Press Run tests to watch your code drive the practice app in the preview."}</p>}
               {log.map((e, i) => (
                 <div key={i} className="flex gap-2 whitespace-pre-wrap break-words">
                   <span aria-hidden style={{ color: e.kind === "pass" ? "var(--good)" : e.kind === "fail" || e.kind === "error" ? "#e11d48" : "var(--muted)" }}>
@@ -582,7 +728,7 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
             </div>
             {solTab === "selenium" && (
               <p className="text-xs muted">
-                The Selenium version is for study and for running locally against {`https://interview.qatechlabs.com${app.base}`}. The in-browser runner executes Playwright-style TypeScript.
+                The Selenium version is for study and for running locally against {remote ? app.base : `https://interview.qatechlabs.com${app.base}`}. {remote ? "The lab runner executes Playwright TypeScript on GitHub Actions." : "The in-browser runner executes Playwright-style TypeScript."}
               </p>
             )}
             <div>

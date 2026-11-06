@@ -1,6 +1,6 @@
 import type { RunResult } from "@/lib/lab/runtime";
 
-export type LabAppId = "swagshop" | "peopledesk" | "trendkart";
+export type LabAppId = "swagshop" | "peopledesk" | "trendkart" | "saucedemo" | "orangehrm" | "automationexercise";
 
 export interface LabApp {
   id: LabAppId;
@@ -10,6 +10,8 @@ export interface LabApp {
   base: string;
   blurb: string;
   credentials: string;
+  /** A real public site: labs run in GitHub Actions in the learner's repo instead of the in-browser runner. `base` is the absolute URL. */
+  remote?: boolean;
 }
 
 export const LAB_APPS: LabApp[] = [
@@ -40,9 +42,40 @@ export const LAB_APPS: LabApp[] = [
     blurb: "Search with a loading state, brand and price filters, sorting, size selection, bag, coupons and delivery fee.",
     credentials: "No login needed",
   },
+  {
+    id: "saucedemo",
+    name: "Sauce Demo",
+    styledAfter: "the real saucedemo.com, the public Sauce Labs demo store",
+    icon: "🧪",
+    base: "https://www.saucedemo.com",
+    blurb: "The screening site every automation interviewer knows: login users, product sorting, cart and checkout.",
+    credentials: "standard_user, locked_out_user, problem_user, performance_glitch_user / secret_sauce",
+    remote: true,
+  },
+  {
+    id: "orangehrm",
+    name: "OrangeHRM demo",
+    styledAfter: "the real OrangeHRM open-source demo at opensource-demo.orangehrmlive.com",
+    icon: "🏢",
+    base: "https://opensource-demo.orangehrmlive.com",
+    blurb: "A full HR system: login, dashboard, PIM employee records, leave, recruitment. Shared and slow, like a real client environment.",
+    credentials: "Admin / admin123",
+    remote: true,
+  },
+  {
+    id: "automationexercise",
+    name: "AutomationExercise",
+    styledAfter: "the real automationexercise.com practice site",
+    icon: "🛍️",
+    base: "https://automationexercise.com",
+    blurb: "Registration, products, search, cart, checkout and a public JSON API. Ads and modals included, as in production.",
+    credentials: "Create your own user in the test",
+    remote: true,
+  },
 ];
 
 export const labApp = (id: LabAppId) => LAB_APPS.find((a) => a.id === id)!;
+export const isRemote = (s: { app: LabAppId }) => !!labApp(s.app).remote;
 
 /** State exposed by each practice app on window.__lab. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -991,6 +1024,455 @@ export class SearchPage {
       { label: "The data file has at least three rows", test: (c) => ((c.files["data/searches.ts"] || "").match(/query\s*:/g) || []).length >= 3 },
       { label: "parsePrice is implemented and used", test: (c) => /return\s+(?!0;)/.test(c.files["helpers/money.ts"] || "") && Object.entries(c.files).some(([f, src]) => f.startsWith("tests/") && /parsePrice\b/.test(src)) },
       { label: "No raw locators in the spec", test: (c) => Object.entries(c.files).filter(([f]) => f.startsWith("tests/")).every(([, src]) => !/page\s*\.\s*(getBy\w+|locator|click|fill)\s*\(/.test(src)) },
+    ],
+  },
+  // ---------------- Real sites (run on GitHub Actions) ----------------
+  {
+    id: "saucedemo-login",
+    app: "saucedemo",
+    title: "Log in to Sauce Demo and verify the products page",
+    level: "Fresher",
+    minutes: 10,
+    free: true,
+    story:
+      "The interviewer opens saucedemo.com and says: \"This is the site we use for screening. Log in as standard_user, prove you landed on the products page, and show me the locked-out user gets the error message. Run it for real, not in a mock.\"",
+    criteria: [
+      "Log in as standard_user / secret_sauce and assert the URL contains /inventory.html.",
+      "Assert the Products title is visible and 6 inventory items are listed.",
+      "In a second test, log in as locked_out_user and assert the error contains \"locked out\".",
+    ],
+    hints: [
+      "The inputs have placeholders: page.getByPlaceholder('Username') and page.getByPlaceholder('Password').",
+      "The login button is an input type=submit, so getByRole('button', { name: 'Login' }) finds it.",
+      "Every product card has data-test=\"inventory-item\" and the error box has data-test=\"error\".",
+      "The run happens on GitHub Actions in your repo: sign in with GitHub, press Run on GitHub and watch the log.",
+    ],
+    starter:
+      header +
+      `test('standard user lands on the products page', async ({ page }) => {
+  await page.goto('/');
+
+  // TODO: fill the username and password, click Login
+
+  // TODO: assert the URL, the "Products" title and 6 items
+});
+
+test('locked out user sees an error', async ({ page }) => {
+  await page.goto('/');
+
+  // TODO: log in as locked_out_user and assert the error message
+});
+`,
+    minAssertions: 3,
+    skills: ["Real site", "Locators", "toHaveURL", "toHaveCount"],
+    checks: [
+      { label: "Both tests passed on GitHub Actions", test: (c) => c.result.tests.length >= 2 && c.result.tests.every((t) => t.ok) },
+      { label: "You asserted the URL or the page title", test: (c) => usesAny(c, "toHaveURL", "toBeVisible", "toHaveText", "toContainText") },
+      { label: "You asserted the number of products", test: (c) => usesAny(c, "toHaveCount") || codeHas(c, /\.count\(\)/) },
+      { label: "The locked-out test checks the error text", test: (c) => codeHas(c, /locked_out_user/) && codeHas(c, /locked out/i) },
+    ],
+  },
+  {
+    id: "saucedemo-pom-framework",
+    app: "saucedemo",
+    title: "Page Object framework for Sauce Demo, run on CI",
+    level: "Mid",
+    minutes: 30,
+    free: false,
+    story:
+      "\"Set up a small framework against saucedemo.com the way you would on day one of a project: page objects for login, inventory and cart, a fixture that logs in, and tests that read like English. Then run it on CI and show me green.\"",
+    criteria: [
+      "pages/login.page.ts exports LoginPage with goto() and login(username, password).",
+      "pages/inventory.page.ts exports InventoryPage with addToCart(name), cartCount(), sortBy(value) and prices().",
+      "pages/cart.page.ts exports CartPage with itemNames().",
+      "fixtures.ts extends test with an inventory fixture that logs in as standard_user.",
+      "tests/shop.spec.ts has at least two tests that use only fixtures and page objects: the badge shows 2 after adding two items and they appear in the cart; prices ascend after sorting low to high.",
+    ],
+    hints: [
+      "Each product card is .inventory_item; its name is .inventory_item_name and price .inventory_item_price (\"$29.99\").",
+      "Add-to-cart buttons live inside the card: card.getByRole('button', { name: 'Add to cart' }).",
+      "The sort dropdown is select[data-test=\"product-sort-container\"] with values az, za, lohi, hilo.",
+      "The cart badge is .shopping_cart_badge; the cart link is .shopping_cart_link and cart rows are .cart_item.",
+    ],
+    starter: "",
+    files: {
+      "tests/shop.spec.ts": `import { test, expect } from '../fixtures';
+
+test('two items added show in the badge and the cart', async ({ inventory }) => {
+  // TODO
+});
+
+test('sorting low to high orders prices ascending', async ({ inventory }) => {
+  // TODO
+});
+`,
+      "fixtures.ts": `import { test as base } from '@playwright/test';
+import { LoginPage } from './pages/login.page';
+import { InventoryPage } from './pages/inventory.page';
+
+export const test = base.extend<{ inventory: InventoryPage }>({
+  inventory: async ({ page }, use) => {
+    // TODO: log in with LoginPage, then hand the test an InventoryPage
+  },
+});
+
+export { expect } from '@playwright/test';
+`,
+      "pages/login.page.ts": `import type { Page } from '@playwright/test';
+
+export class LoginPage {
+  constructor(private readonly page: Page) {}
+
+  async goto() {
+    await this.page.goto('/');
+  }
+
+  async login(username: string, password: string) {
+    // TODO
+  }
+}
+`,
+      "pages/inventory.page.ts": `import type { Page } from '@playwright/test';
+
+export class InventoryPage {
+  constructor(private readonly page: Page) {}
+
+  async addToCart(productName: string) {
+    // TODO
+  }
+
+  async cartCount(): Promise<number> {
+    return 0;
+  }
+
+  async sortBy(value: 'az' | 'za' | 'lohi' | 'hilo') {
+    // TODO
+  }
+
+  async prices(): Promise<number[]> {
+    return [];
+  }
+
+  async openCart() {
+    // TODO
+  }
+}
+`,
+      "pages/cart.page.ts": `import type { Page } from '@playwright/test';
+
+export class CartPage {
+  constructor(private readonly page: Page) {}
+
+  async itemNames(): Promise<string[]> {
+    return [];
+  }
+}
+`,
+    },
+    minAssertions: 3,
+    skills: ["Real site", "Page Objects", "Custom fixtures", "CI run"],
+    checks: [
+      { label: "All tests passed on GitHub Actions", test: (c) => c.result.tests.length >= 2 && c.result.tests.every((t) => t.ok) },
+      { label: "Three page objects in pages/", test: (c) => ["login", "inventory", "cart"].every((n) => /export\s+class/.test(c.files[`pages/${n}.page.ts`] || "")) },
+      { label: "fixtures.ts extends test with an inventory fixture", test: (c) => /\.extend\s*</.test(c.files["fixtures.ts"] || "") && /inventory\s*:/.test(c.files["fixtures.ts"] || "") },
+      { label: "No raw locators in the spec", test: (c) => Object.entries(c.files).filter(([f]) => f.startsWith("tests/")).every(([, src]) => !/page\s*\.\s*(getBy\w+|locator|click|fill)\s*\(/.test(src)) },
+      { label: "Sorting is verified against a sorted copy", test: (c) => codeHas(c, /\.sort\s*\(/) },
+    ],
+  },
+  {
+    id: "orangehrm-login",
+    app: "orangehrm",
+    title: "OrangeHRM login: happy path and invalid credentials",
+    level: "Junior",
+    minutes: 10,
+    free: true,
+    story:
+      "\"Our client runs OrangeHRM. Automate the login against the public demo: Admin can log in and lands on the dashboard, and a wrong password shows 'Invalid credentials'. The demo is slow, so handle waiting properly, no sleeps.\"",
+    criteria: [
+      "Log in as Admin / admin123 and assert the URL contains /dashboard.",
+      "Assert the Dashboard heading is visible.",
+      "In a second test, log in with a wrong password and assert the text \"Invalid credentials\" is shown.",
+    ],
+    hints: [
+      "The demo is at /web/index.php/auth/login; page.goto('/') redirects there.",
+      "Inputs have placeholders Username and Password; the button is getByRole('button', { name: 'Login' }).",
+      "The heading is an h6 with the text Dashboard: page.getByRole('heading', { name: 'Dashboard' }).",
+      "Web-first assertions (await expect(locator).toBeVisible()) wait up to the timeout, so you never need waitForTimeout.",
+    ],
+    starter:
+      header +
+      `test('Admin can log in and sees the dashboard', async ({ page }) => {
+  await page.goto('/web/index.php/auth/login');
+
+  // TODO
+});
+
+test('wrong password shows Invalid credentials', async ({ page }) => {
+  await page.goto('/web/index.php/auth/login');
+
+  // TODO
+});
+`,
+    minAssertions: 2,
+    skills: ["Real site", "Auto-waiting", "Negative test"],
+    checks: [
+      { label: "Both tests passed on GitHub Actions", test: (c) => c.result.tests.length >= 2 && c.result.tests.every((t) => t.ok) },
+      { label: "You asserted the dashboard URL or heading", test: (c) => usesAny(c, "toHaveURL", "toBeVisible", "toHaveText", "toContainText") },
+      { label: "The negative test checks for Invalid credentials", test: (c) => codeHas(c, /Invalid credentials/) },
+      { label: "No hard waits (waitForTimeout)", test: (c) => !codeHas(c, /waitForTimeout/) },
+    ],
+  },
+  {
+    id: "orangehrm-pim-framework",
+    app: "orangehrm",
+    title: "Add an employee through a PIM page object, with unique test data",
+    level: "Senior",
+    minutes: 35,
+    free: false,
+    story:
+      "\"The PIM module is where most of our regression lives. Build a LoginPage and a PimPage, a fixture that logs in as Admin, and a test that adds a new employee with a unique name and proves the personal details page shows it. The demo database is shared with the whole internet, so your data must not collide.\"",
+    criteria: [
+      "pages/login.page.ts exports LoginPage with goto() and login(username, password).",
+      "pages/pim.page.ts exports PimPage with addEmployee(firstName, lastName) and employeeName() (the heading on the personal details page).",
+      "fixtures.ts extends test with a pim fixture that logs in and opens the Add Employee page.",
+      "tests/employee.spec.ts adds an employee whose last name contains a unique suffix (for example Date.now()) and asserts the heading shows the full name.",
+    ],
+    hints: [
+      "Add Employee lives at /web/index.php/pim/addEmployee with input[name=\"firstName\"] and input[name=\"lastName\"].",
+      "Save is getByRole('button', { name: 'Save' }). After saving, the URL contains /pim/viewPersonalDetails.",
+      "The name heading is .orangehrm-edit-employee-name h6; wait for it with expect(...).toHaveText(...).",
+      "Keep the name short: OrangeHRM limits first and last names to 30 characters.",
+    ],
+    starter: "",
+    files: {
+      "tests/employee.spec.ts": `import { test, expect } from '../fixtures';
+
+test('a new employee appears on the personal details page', async ({ pim }) => {
+  // TODO: unique last name, addEmployee, assert employeeName()
+});
+`,
+      "fixtures.ts": `import { test as base } from '@playwright/test';
+import { LoginPage } from './pages/login.page';
+import { PimPage } from './pages/pim.page';
+
+export const test = base.extend<{ pim: PimPage }>({
+  pim: async ({ page }, use) => {
+    // TODO: log in as Admin / admin123, open Add Employee, hand over a PimPage
+  },
+});
+
+export { expect } from '@playwright/test';
+`,
+      "pages/login.page.ts": `import type { Page } from '@playwright/test';
+
+export class LoginPage {
+  constructor(private readonly page: Page) {}
+
+  async goto() {
+    await this.page.goto('/web/index.php/auth/login');
+  }
+
+  async login(username: string, password: string) {
+    // TODO
+  }
+}
+`,
+      "pages/pim.page.ts": `import type { Page } from '@playwright/test';
+
+export class PimPage {
+  constructor(private readonly page: Page) {}
+
+  async gotoAddEmployee() {
+    await this.page.goto('/web/index.php/pim/addEmployee');
+  }
+
+  async addEmployee(firstName: string, lastName: string) {
+    // TODO
+  }
+
+  async employeeName(): Promise<string> {
+    return '';
+  }
+}
+`,
+    },
+    minAssertions: 1,
+    skills: ["Real site", "Page Objects", "Unique test data", "CI run"],
+    checks: [
+      { label: "The test passed on GitHub Actions", test: (c) => c.result.tests.length >= 1 && c.result.tests.every((t) => t.ok) },
+      { label: "PimPage and LoginPage exist in pages/", test: (c) => /export\s+class\s+PimPage/.test(c.files["pages/pim.page.ts"] || "") && /export\s+class\s+LoginPage/.test(c.files["pages/login.page.ts"] || "") },
+      { label: "fixtures.ts provides a pim fixture", test: (c) => /pim\s*:\s*async/.test(c.files["fixtures.ts"] || "") && /await\s+use\s*\(/.test(c.files["fixtures.ts"] || "") },
+      { label: "The employee name is unique per run", test: (c) => Object.entries(c.files).some(([f, src]) => f.startsWith("tests/") && /(Date\.now\(\)|Math\.random\(\)|randomUUID|crypto\.)/.test(src)) },
+      { label: "No raw locators in the spec", test: (c) => Object.entries(c.files).filter(([f]) => f.startsWith("tests/")).every(([, src]) => !/page\s*\.\s*(getBy\w+|locator|click|fill)\s*\(/.test(src)) },
+    ],
+  },
+  {
+    id: "automationexercise-signup",
+    app: "automationexercise",
+    title: "Register a user end to end, then delete the account",
+    level: "Mid",
+    minutes: 25,
+    free: false,
+    story:
+      "\"Test case 1 from the AutomationExercise list, the one every candidate claims to have done: sign up with a fresh email, fill the account form, verify 'Account Created', log in state, then delete the account so the test is repeatable. Make it pass on CI, not just on your laptop.\"",
+    criteria: [
+      "Open the site, go to Signup / Login and sign up with a name and a unique email.",
+      "Fill the account information form (password, date of birth, first and last name, address, country, state, city, zipcode, mobile number) and create the account.",
+      "Assert \"Account Created!\" is visible, continue, and assert \"Logged in as <name>\" is shown.",
+      "Delete the account and assert \"Account Deleted!\" is visible.",
+    ],
+    hints: [
+      "Form fields carry data-qa attributes: input[data-qa=\"signup-name\"], input[data-qa=\"signup-email\"], button[data-qa=\"signup-button\"], then data-qa=\"password\", \"first_name\", \"last_name\", \"address\", \"state\", \"city\", \"zipcode\", \"mobile_number\", \"create-account\".",
+      "The selects: select[data-qa=\"days\"], months, years and country; use selectOption('10'), selectOption('May'), selectOption('1990'), selectOption('India').",
+      "Success messages: h2[data-qa=\"account-created\"], a[data-qa=\"continue-button\"], a[href=\"/delete_account\"], h2[data-qa=\"account-deleted\"].",
+      "Build the email from Date.now() so a rerun never hits \"Email Address already exist!\".",
+    ],
+    starter:
+      header +
+      `const email = \`qir-\${Date.now()}@example.com\`;
+
+test('register a new user and delete the account', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('a[href="/login"]').click();
+
+  // TODO: sign up (name + email), fill the account form, create the account
+
+  // TODO: assert Account Created!, continue, assert Logged in as
+
+  // TODO: delete the account and assert Account Deleted!
+});
+`,
+    minAssertions: 3,
+    skills: ["Real site", "Forms and selects", "Unique test data", "Cleanup"],
+    checks: [
+      { label: "The test passed on GitHub Actions", test: (c) => c.result.tests.length >= 1 && c.result.tests.every((t) => t.ok) },
+      { label: "The email is unique per run", test: (c) => codeHas(c, /(Date\.now\(\)|Math\.random\(\)|randomUUID)/) },
+      { label: "You asserted Account Created and Account Deleted", test: (c) => codeHas(c, /account-created|Account Created/) && codeHas(c, /account-deleted|Account Deleted/) },
+      { label: "The account is deleted at the end", test: (c) => codeHas(c, /delete_account/) },
+    ],
+  },
+  {
+    id: "automationexercise-products-framework",
+    app: "automationexercise",
+    title: "Products page object: search results and the cart",
+    level: "Mid",
+    minutes: 30,
+    free: false,
+    story:
+      "\"Build a ProductsPage and a CartPage for automationexercise.com. Searching for 'dress' must show only matching products, and adding the first two products must put two rows in the cart. The site is full of ads and a modal after every add to cart, so your page objects need to cope with that.\"",
+    criteria: [
+      "pages/products.page.ts exports ProductsPage with goto(), search(term), productNames() and addToCart(index) that closes the \"Added!\" modal.",
+      "pages/cart.page.ts exports CartPage with goto() and rowCount().",
+      "tests/products.spec.ts has two tests: every search result name contains the term; the cart has 2 rows after adding two products.",
+      "The spec uses only page objects: no page.locator or getBy in the spec.",
+    ],
+    hints: [
+      "Products are at /products; search uses #search_product and #submit_search; names are .productinfo p.",
+      "Add to cart: .productinfo a.add-to-cart (nth(index)), then the modal #cartModal appears; close it with getByRole('button', { name: 'Continue Shopping' }).",
+      "The cart page is /view_cart and rows are #cart_info_table tbody tr.",
+      "Case-insensitive contains: name.toLowerCase().includes(term.toLowerCase()).",
+    ],
+    starter: "",
+    files: {
+      "tests/products.spec.ts": `import { test, expect } from '@playwright/test';
+import { ProductsPage } from '../pages/products.page';
+import { CartPage } from '../pages/cart.page';
+
+test('search results all match the term', async ({ page }) => {
+  // TODO
+});
+
+test('adding two products puts two rows in the cart', async ({ page }) => {
+  // TODO
+});
+`,
+      "pages/products.page.ts": `import type { Page } from '@playwright/test';
+
+export class ProductsPage {
+  constructor(private readonly page: Page) {}
+
+  async goto() {
+    await this.page.goto('/products');
+  }
+
+  async search(term: string) {
+    // TODO
+  }
+
+  async productNames(): Promise<string[]> {
+    return [];
+  }
+
+  async addToCart(index: number) {
+    // TODO: click add to cart on the nth product, then close the modal
+  }
+}
+`,
+      "pages/cart.page.ts": `import type { Page } from '@playwright/test';
+
+export class CartPage {
+  constructor(private readonly page: Page) {}
+
+  async goto() {
+    await this.page.goto('/view_cart');
+  }
+
+  async rowCount(): Promise<number> {
+    return 0;
+  }
+}
+`,
+    },
+    minAssertions: 2,
+    skills: ["Real site", "Page Objects", "Modals", "CI run"],
+    checks: [
+      { label: "Both tests passed on GitHub Actions", test: (c) => c.result.tests.length >= 2 && c.result.tests.every((t) => t.ok) },
+      { label: "ProductsPage and CartPage exist", test: (c) => /export\s+class\s+ProductsPage/.test(c.files["pages/products.page.ts"] || "") && /export\s+class\s+CartPage/.test(c.files["pages/cart.page.ts"] || "") },
+      { label: "No raw locators in the spec", test: (c) => Object.entries(c.files).filter(([f]) => f.startsWith("tests/")).every(([, src]) => !/page\s*\.\s*(getBy\w+|locator|click|fill)\s*\(/.test(src)) },
+      { label: "Every search result is checked, not just the first", test: (c) => Object.entries(c.files).some(([f, src]) => f.startsWith("tests/") && /(for\s*\(|\.every\s*\(|\.forEach\s*\(|\.map\s*\()/.test(src)) },
+    ],
+  },
+  {
+    id: "automationexercise-api",
+    app: "automationexercise",
+    title: "API tests with the request fixture",
+    level: "Senior",
+    minutes: 20,
+    free: false,
+    story:
+      "\"Same product, other layer: write API tests for automationexercise.com with Playwright's request fixture. Product list, search, and a negative case. Bear in mind the API answers with text/html, so you parse the body yourself.\"",
+    criteria: [
+      "GET /api/productsList returns responseCode 200 and a non-empty products array.",
+      "POST /api/searchProduct with form field search_product=tshirt returns products whose names all contain \"shirt\" (case-insensitive).",
+      "POST /api/verifyLogin without an email returns responseCode 400 and a message mentioning the missing parameter.",
+    ],
+    hints: [
+      "Use the request fixture: test('...', async ({ request }) => { const res = await request.get('/api/productsList'); ... }).",
+      "The content type is text/html, so do const body = JSON.parse(await res.text()).",
+      "Form posts: request.post('/api/searchProduct', { form: { search_product: 'tshirt' } }).",
+      "The HTTP status is 200 even for errors; the real status is body.responseCode.",
+    ],
+    starter:
+      header +
+      `test('GET productsList returns products', async ({ request }) => {
+  // TODO
+});
+
+test('POST searchProduct filters by name', async ({ request }) => {
+  // TODO
+});
+
+test('POST verifyLogin without email is a 400', async ({ request }) => {
+  // TODO
+});
+`,
+    minAssertions: 4,
+    skills: ["API testing", "request fixture", "Negative test"],
+    checks: [
+      { label: "All three tests passed on GitHub Actions", test: (c) => c.result.tests.length >= 3 && c.result.tests.every((t) => t.ok) },
+      { label: "Tests use the request fixture", test: (c) => codeHas(c, /\{\s*request\s*\}/) },
+      { label: "The body is parsed from text", test: (c) => codeHas(c, /JSON\.parse\s*\(/) },
+      { label: "The negative case checks responseCode 400", test: (c) => codeHas(c, /400/) },
     ],
   },
 ];

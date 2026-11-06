@@ -64,6 +64,8 @@ Redeploy after saving. Until these are set, the labs work exactly as today and t
 
 ## 5. Check it works
 
+Open https://interview.qatechlabs.com/api/github/status first. It lists any missing variable by name, says whether the private key parses, whether GitHub accepts the App credentials (`app.slug`) and whether the app is installed on the lab organisation. It never shows secret values. When `configured` is false the sign-in button is hidden and `missing` tells you why.
+
 1. Open https://interview.qatechlabs.com/labs, click **Sign in with GitHub** and authorise the app with any GitHub account (your personal one is fine).
 2. Open a lab and press **Run tests**. Within a few seconds the lab shows a link to the new repo `qatechlabs/lab-<your-login>` and the commit that was just made.
 3. The learner (you, in this test) receives a collaborator invitation by email; accepting it gives them push access. The repo is public, the commits are authored in their name, so they show up on their GitHub profile.
@@ -71,6 +73,7 @@ Redeploy after saving. Until these are set, the labs work exactly as today and t
 
 ## Things to know
 
+- Real-site labs need GitHub Actions enabled for repos in the organisation (Organization settings → Actions → General → "Allow all actions and reusable workflows", which is the default). Each run takes 1–3 minutes on GitHub's free runners because it installs Playwright and Chromium.
 - Repos are **public** on purpose. GitHub Actions is free for public repos; private repos would share the organisation's 2,000 free minutes a month and run out quickly. Public repos also give learners a portfolio link.
 - The app only ever touches repos named `lab-*`. It cannot see or change `qa-interview-ready`.
 - To stop a learner, delete their `lab-<login>` repo in GitHub. To stop everything, uninstall the app from the organisation.
