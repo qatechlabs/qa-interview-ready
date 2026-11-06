@@ -1,12 +1,19 @@
 "use client";
 import Link from "next/link";
+import { useMemo, useState } from "react";
 import { useProgress } from "@/lib/progress";
-import type { QuestionSummary } from "@/content/types";
+import type { QuestionSummary, TopicId } from "@/content/types";
 import { TOPICS } from "@/content/meta";
 
 export function LevelPath({ modules, premium }: { modules: { module: string; questions: QuestionSummary[] }[]; premium: boolean }) {
   const { state } = useProgress();
+  const [topic, setTopic] = useState<TopicId | "all">("all");
+  const [hideDone, setHideDone] = useState(false);
   const all = modules.flatMap((m) => m.questions);
+  const topics = useMemo(() => Array.from(new Set(all.map((q) => q.topic))), [all]);
+  const visible = modules
+    .map((m) => ({ ...m, questions: m.questions.filter((q) => (topic === "all" || q.topic === topic) && (!hideDone || !state.done[q.id])) }))
+    .filter((m) => m.questions.length);
   const doneCount = all.filter((q) => state.done[q.id]).length;
   const nextUp = all.find((q) => !state.done[q.id] && (premium || q.free));
   const pct = all.length ? Math.round((doneCount / all.length) * 100) : 0;
@@ -21,9 +28,19 @@ export function LevelPath({ modules, premium }: { modules: { module: string; que
         </div>
         {nextUp && <Link href={`/q/${nextUp.id}`} className="btn btn-primary">{doneCount ? "Continue" : "Start"}: Q{nextUp.order} →</Link>}
       </div>
-      {modules.map((m, mi) => (
+      <div className="flex flex-wrap items-center gap-2">
+        <button onClick={() => setTopic("all")} className="btn btn-ghost !py-1 text-xs" style={topic === "all" ? { background: "var(--accent-soft)", color: "var(--accent)", borderColor: "var(--accent)" } : undefined}>All topics</button>
+        {topics.map((t) => (
+          <button key={t} onClick={() => setTopic(t)} className="btn btn-ghost !py-1 text-xs" style={topic === t ? { background: "var(--accent-soft)", color: "var(--accent)", borderColor: "var(--accent)" } : undefined}>{TOPICS[t].short}</button>
+        ))}
+        <label className="ml-auto flex items-center gap-1.5 text-xs muted">
+          <input type="checkbox" checked={hideDone} onChange={(e) => setHideDone(e.target.checked)} /> Hide done
+        </label>
+      </div>
+      {!visible.length && <p className="card p-6 text-center text-sm muted">Nothing matches. {hideDone ? "Everything in this filter is done." : "Try another topic."}</p>}
+      {visible.map((m) => (
         <section key={m.module}>
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide muted">Module {mi + 1} · {m.module}</h2>
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide muted">Module {modules.findIndex((x) => x.module === m.module) + 1} · {m.module}</h2>
           <ol className="card divide-y" style={{ borderColor: "var(--border)" }}>
             {m.questions.map((q) => {
               const locked = !premium && !q.free;

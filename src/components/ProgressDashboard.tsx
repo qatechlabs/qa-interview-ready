@@ -2,10 +2,13 @@
 import Link from "next/link";
 import { useProgress } from "@/lib/progress";
 import type { QuestionSummary } from "@/content/types";
-import { LEVELS } from "@/content/meta";
+import { LEVELS, TOPICS, levelMeta } from "@/content/meta";
+import { useMockHistory, scoreOf, weakTopics } from "@/lib/mock";
 
 export function ProgressDashboard({ summaries }: { summaries: QuestionSummary[] }) {
   const { state, reset } = useProgress();
+  const { rounds, clear: clearRounds } = useMockHistory();
+  const weak = weakTopics(rounds).slice(0, 4);
   const byId = new Map(summaries.map((s) => [s.id, s]));
   const list = (bucket: Record<string, number>) =>
     Object.entries(bucket).sort((a, b) => b[1] - a[1]).map(([id]) => byId.get(id)).filter(Boolean) as QuestionSummary[];
@@ -29,6 +32,43 @@ export function ProgressDashboard({ summaries }: { summaries: QuestionSummary[] 
           );
         })}
       </div>
+      <section className="grid gap-4 md:grid-cols-2">
+        <div className="card p-5">
+          <h2 className="font-semibold">🎤 Mock interview rounds <span className="muted">({rounds.length})</span></h2>
+          {rounds.length ? (
+            <ul className="mt-3 space-y-2 text-sm">
+              {rounds.slice(0, 6).map((r) => {
+                const score = scoreOf(r);
+                return (
+                  <li key={r.id} className="flex items-center gap-3">
+                    <span className="w-12 font-semibold" style={{ color: score >= 80 ? "var(--good)" : score >= 50 ? "var(--warn)" : "var(--accent)" }}>{score}%</span>
+                    <span className="flex-1">{levelMeta(r.level)?.name} · {r.results.length} questions</span>
+                    <span className="muted">{new Date(r.at).toLocaleDateString()}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <p className="mt-2 text-sm muted">No rounds yet. <Link href="/mock" className="underline">Start a mock interview</Link>.</p>
+          )}
+        </div>
+        <div className="card p-5">
+          <h2 className="font-semibold">Weak topics</h2>
+          {weak.length ? (
+            <ul className="mt-3 space-y-2 text-sm">
+              {weak.map((w) => (
+                <li key={w.topic} className="flex items-center gap-3">
+                  <span className="flex-1">{TOPICS[w.topic].name}</span>
+                  <span className="muted">{Math.round(w.missRate * 100)}% not nailed · {w.n} asked</span>
+                  <Link href={`/search?topic=${w.topic}`} className="accent hover:underline">Revise →</Link>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-2 text-sm muted">Complete a couple of mock rounds and your weakest topics will show up here.</p>
+          )}
+        </div>
+      </section>
       {sections.map(([title, items]) => (
         <section key={title}>
           <h2 className="mb-2 font-semibold">{title} <span className="muted">({items.length})</span></h2>
@@ -47,7 +87,7 @@ export function ProgressDashboard({ summaries }: { summaries: QuestionSummary[] 
       ))}
       <p className="text-xs muted">
         Progress is saved in this browser only.{" "}
-        <button className="underline" onClick={() => { if (confirm("Clear all progress in this browser?")) reset(); }}>Reset progress</button>
+        <button className="underline" onClick={() => { if (confirm("Clear all progress in this browser?")) { reset(); clearRounds(); } }}>Reset progress</button>
       </p>
     </div>
   );

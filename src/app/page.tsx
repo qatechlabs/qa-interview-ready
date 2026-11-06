@@ -47,16 +47,18 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="grid gap-4 sm:grid-cols-3">
+      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {[
-          ["🎯", "Ordered, not random", "Each level is a study path. Concepts build on each other, so you prepare the way interviewers think."],
-          ["⏱", "60-second answers", "A crisp spoken answer first, with a timer to rehearse, then the deep explanation and example."],
-          ["💻", "Real code", "Java for Selenium and REST Assured, TypeScript for Playwright, Python, SQL, YAML and more."],
-        ].map(([icon, title, text]) => (
+          ["🎯", "Ordered, not random", "Each level is a study path. Concepts build on each other, so you prepare the way interviewers think.", null],
+          ["⏱", "60-second answers", "A crisp spoken answer first, with a timer to rehearse, then the deep explanation and example.", null],
+          ["💻", "Real code", "Java for Selenium and REST Assured, TypeScript for Playwright, Python, SQL, YAML and more.", null],
+          ["🎤", "Mock interviews", "Timed rounds that score you, track weak topics and build your revision list automatically.", "/mock"],
+        ].map(([icon, title, text, href]) => (
           <div key={title} className="card p-5">
             <div className="text-2xl">{icon}</div>
             <h3 className="mt-2 font-semibold">{title}</h3>
             <p className="mt-1 text-sm muted">{text}</p>
+            {href && <Link href={href} className="mt-2 inline-block text-sm font-semibold accent hover:underline">Try a round →</Link>}
           </div>
         ))}
       </section>

@@ -7,6 +7,8 @@ Interview preparation for QA engineers, from fresher to test architect. Each lev
 - Five levels (Fresher, Junior, Mid, Senior SDET, Lead/Architect), each an ordered study path grouped into modules.
 - 240+ curated questions across fundamentals, test design, SQL, Git, Java/Python, Selenium, Playwright, API testing, frameworks, CI/CD, performance and strategy.
 - Flashcard mode per level with "got it" and "practice again", shuffle, and keyboard shortcuts.
+- Mock interview mode per level: timed 5/10/15-question rounds (mixed, weak-spots or per-topic), self-grading, score, weak-topic tracking on the progress page.
+- Topic filters and "hide done" on every level path.
 - Search by keyword, level and topic.
 - Progress (done, bookmarks, practice-again) saved in the browser. No sign-up.
 - Freemium: the first N questions of every level are free; a one-time payment unlocks everything.
