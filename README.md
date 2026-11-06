@@ -1,36 +1,87 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# QA Interview Ready
 
-## Getting Started
+Interview preparation for QA engineers, from fresher to test architect. Each level has an ordered study path; every question has a 60-second spoken answer, a deeper explanation, a real-world example and sample code. Built with Next.js 14, hosted on Vercel, paid access through Razorpay.
 
-First, run the development server:
+## Features
+
+- Five levels (Fresher, Junior, Mid, Senior SDET, Lead/Architect), each an ordered study path grouped into modules.
+- 240+ curated questions across fundamentals, test design, SQL, Git, Java/Python, Selenium, Playwright, API testing, frameworks, CI/CD, performance and strategy.
+- Flashcard mode per level with "got it" and "practice again", shuffle, and keyboard shortcuts.
+- Search by keyword, level and topic.
+- Progress (done, bookmarks, practice-again) saved in the browser. No sign-up.
+- Freemium: the first N questions of every level are free; a one-time payment unlocks everything.
+- Paid answers never ship to the browser until the visitor has a valid access cookie.
+
+## Local development
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+cp .env.example .env.local   # fill in the values you need
+npm run dev                  # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+`npm run dev` and `npm run build` first run `npm run content`, which converts `content/*.md` into JSON in `src/content/questions/` (git-ignored).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Editing questions
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Questions live in `content/<level>.md`, one file per level, in study-path order. Format:
 
-## Learn More
+````markdown
+# Module: Name of the module
 
-To learn more about Next.js, take a look at the following resources:
+## The question text?
+@topic selenium
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### 60s
+The answer you could say out loud in about a minute.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Explain
+Deeper explanation. Blank lines separate paragraphs. Lines starting with "- " become bullets,
+"1. " become numbered lists, and | tables | are rendered as tables. `code` and **bold** work inline.
 
-## Deploy on Vercel
+### Example
+A concrete, real-world example.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### Code java | Optional tab label
+```java
+// one or more code blocks; languages: java, typescript, python, sql, bash, yaml,
+// javascript, json, gherkin, groovy, xml, text
+```
+````
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Valid topics: `fundamentals`, `test-design`, `sql`, `git`, `programming`, `selenium`, `playwright`, `api`, `framework`, `cicd`, `performance`, `strategy`.
+
+Run `npm run content` to validate; it fails with a clear message if a section is missing.
+
+## Deploying to Vercel
+
+1. Import the GitHub repo in Vercel (Framework: Next.js, no special settings).
+2. Add the environment variables from `.env.example`. `ACCESS_TOKEN_SECRET` is required in production.
+3. Add the custom domain (`karthik.qatechlabs.com`) under Settings > Domains and point the DNS record Vercel shows you.
+
+## Setting up Razorpay
+
+1. Create a Razorpay account and complete KYC to accept live payments.
+2. Settings > API Keys: generate keys. Start with test mode keys (`rzp_test_...`); switch to live keys when ready.
+3. Put the key ID and secret in Vercel env vars (`RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`) and redeploy.
+4. Test a purchase with Razorpay's test cards / UPI in test mode.
+5. Razorpay requires visible Terms, Privacy, Refund and Contact pages for live activation; they are at `/terms`, `/privacy`, `/refunds`, `/shipping`, `/contact`. Update the business name and support email via env vars.
+
+### How purchases work
+
+- `POST /api/checkout/order` creates a Razorpay order for the configured price.
+- Razorpay Checkout opens in the browser. On success, the browser posts the payment details to `POST /api/checkout/verify`.
+- The server verifies the Razorpay signature, fetches the payment from Razorpay's API, confirms it is captured for this product and amount, then sets a signed, HttpOnly access cookie valid for 5 years.
+- "Restore access" (`POST /api/restore`) lets a buyer unlock another browser with the email they paid with plus the Razorpay payment ID from their receipt. No database is needed; Razorpay is the source of truth.
+
+To change the price, update `PRICE_AMOUNT` (in paise). To change how many questions are free, update `FREE_QUESTIONS_PER_LEVEL`.
+
+## Scripts
+
+| Command | What it does |
+|---|---|
+| `npm run dev` | Build content and start the dev server |
+| `npm run build` | Build content and create a production build |
+| `npm run start` | Serve the production build |
+| `npm run lint` | ESLint |
+| `npm run content` | Convert `content/*.md` to JSON and validate it |

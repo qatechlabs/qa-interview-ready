@@ -31,7 +31,7 @@ export default async function PricingPage({ searchParams }: { searchParams: { we
     );
   }
   const perks = [
-    `All ${total}+ questions across ${LEVELS.length} levels`,
+    `All ${total} questions across ${LEVELS.length} levels`,
     "60-second answer, explanation, example and code for each",
     "Flashcard mode for every level",
     "New questions as they're added",

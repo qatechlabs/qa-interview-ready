@@ -14,7 +14,8 @@ function slugify(s: string) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
-    .slice(0, 70)
+    .slice(0, 80)
+    .replace(/-[^-]*$/, (m, off, str) => (str.length < 80 ? m : ""))
     .replace(/-+$/g, "");
 }
 

@@ -21,7 +21,7 @@ export default function Home() {
           <Link href="#levels" className="btn btn-primary !px-6 !py-3 text-base">Choose your level</Link>
           {first && <Link href={`/q/${first.id}`} className="btn btn-ghost !px-6 !py-3 text-base">Try a free question</Link>}
         </div>
-        <p className="mt-4 text-sm muted">{total}+ questions · first {FREE_PER_LEVEL} of every level free · no sign-up</p>
+        <p className="mt-4 text-sm muted">{total} questions · first {FREE_PER_LEVEL} of every level free · no sign-up</p>
       </section>
 
       <section id="levels" className="scroll-mt-20">
