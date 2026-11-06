@@ -130,7 +130,8 @@ export default defineConfig({
 `,
     ".gitignore": "node_modules/\ntest-results/\nplaywright-report/\nresults.json\nassertions.json\n",
     "lab-reporter.js": LAB_REPORTER,
-    ".github/workflows/lab.yml": `name: Lab run
+    ".github/workflows/lab.yml": `# lab-runner: v2 (managed by QA Interview Ready; edits are replaced before each run)
+name: Lab run
 
 on:
   workflow_dispatch:
@@ -157,11 +158,21 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: npx playwright install --with-deps chromium
       - name: Run the lab
-        run: npx playwright test
+        # A lab folder with its own playwright.config.ts (framework workspaces) runs with that config;
+        # the others use the root config with LAB_DIR as testDir.
+        run: |
+          CONFIG="playwright.config.ts"
+          if [ -f "$LAB_DIR/playwright.config.ts" ]; then CONFIG="$LAB_DIR/playwright.config.ts"; fi
+          echo "Using $CONFIG"
+          npx playwright test --config "$CONFIG" --reporter="list,json,html,$GITHUB_WORKSPACE/lab-reporter.js"
         env:
           CI: "1"
           LAB_DIR: \${{ inputs.lab }}
           LAB_BASE_URL: \${{ inputs.baseURL }}
+          BASE_URL: \${{ inputs.baseURL }}
+          PLAYWRIGHT_JSON_OUTPUT_NAME: \${{ github.workspace }}/results.json
+          PLAYWRIGHT_HTML_OUTPUT_DIR: \${{ github.workspace }}/playwright-report
+          PLAYWRIGHT_HTML_OPEN: never
         continue-on-error: true
       - uses: actions/upload-artifact@v4
         if: always()

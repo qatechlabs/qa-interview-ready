@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { LAB_APPS, isFramework, scenariosFor, SCENARIOS } from "@/lab/scenarios";
+import { ALL_SCENARIOS, LAB_APPS, isFramework, scenariosFor, SCENARIOS, WORKSPACES } from "@/lab/scenarios";
 import { hasPremium } from "@/lib/access";
 import { formatPrice } from "@/lib/config";
 import { LabPassedBadge, LabPassedCount } from "@/components/lab/LabPassedBadge";
@@ -18,7 +18,7 @@ export default async function LabsIndex({ searchParams }: { searchParams?: { git
   const ghCfg = githubConfig();
   const ghUser = ghCfg ? await getGitHubUser() : null;
   const ghError = searchParams?.github === "failed" || searchParams?.github === "state" ? "GitHub sign-in didn't complete. Try again." : null;
-  const freeCount = SCENARIOS.filter((s) => s.free).length;
+  const freeCount = ALL_SCENARIOS.filter((s) => s.free).length;
   return (
     <div className="space-y-10">
       <section>
@@ -46,7 +46,7 @@ export default async function LabsIndex({ searchParams }: { searchParams?: { git
         </div>
         {!premium && (
           <p className="mt-4 text-sm muted">
-            {freeCount} scenarios are free. Full access ({formatPrice()}, one time) unlocks all {SCENARIOS.length}, plus reference solutions in Playwright and Selenium Java.{" "}
+            {freeCount} labs are free. Full access ({formatPrice()}, one time) unlocks all {SCENARIOS.length} scenarios and {WORKSPACES.length} framework workspaces, plus reference solutions in Playwright and Selenium Java.{" "}
             <Link href="/pricing" className="font-semibold accent hover:underline">See pricing</Link>
           </p>
         )}
@@ -74,6 +74,38 @@ export default async function LabsIndex({ searchParams }: { searchParams?: { git
           )}
         </section>
       )}
+
+      <section id="workspaces" className="scroll-mt-24">
+        <div className="mb-3">
+          <h2 className="text-2xl font-bold">🧰 Build a framework from scratch</h2>
+          <p className="text-sm muted">
+            An empty folder and an application, like day one on a project. Write playwright.config.ts, page objects, fixtures, test data and production-grade
+            tests yourself, run them, and get reviewed against a framework rubric. Real sites run on GitHub Actions with your own config.
+          </p>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {WORKSPACES.map((s) => {
+            const app = LAB_APPS.find((a) => a.id === s.app)!;
+            const locked = !s.free && !premium;
+            return (
+              <Link key={s.id} href={`/labs/${s.id}`} className="card flex flex-col p-4 transition hover:-translate-y-0.5 hover:shadow-lg">
+                <div className="mb-2 flex flex-wrap gap-1.5">
+                  <span className="chip">{s.level}</span>
+                  <span className="chip">~{s.minutes} min</span>
+                  {app.remote ? <span className="chip">☁ Real site · GitHub Actions</span> : <span className="chip">Browser + GitHub Actions</span>}
+                  {s.free && !premium && <span className="chip" style={{ color: "var(--good)" }}>Free</span>}
+                  {locked && <span className="chip">🔒 Full access</span>}
+                  <LabPassedBadge id={s.id} />
+                </div>
+                <h3 className="font-semibold">
+                  <span aria-hidden>{app.icon}</span> {app.name}
+                </h3>
+                <p className="mt-1 flex-1 text-sm muted">{app.blurb}</p>
+              </Link>
+            );
+          })}
+        </div>
+      </section>
 
       {LAB_APPS.map((app) => {
         const list = scenariosFor(app.id);
@@ -127,7 +159,7 @@ export default async function LabsIndex({ searchParams }: { searchParams?: { git
         <h2 className="font-semibold">Practising with your own framework</h2>
         <p className="mt-1 muted">
           The practice apps are public pages, so you can also point a local Selenium, Playwright or Cypress project at them, for example{" "}
-          <code className="inline-code">https://interview.qatechlabs.com/sandbox/swagshop</code>. The real-site labs use sites that exist for automation
+          <code className="inline-code break-all">https://interview.qatechlabs.com/sandbox/swagshop</code>. The real-site labs use sites that exist for automation
           practice: saucedemo.com, the OrangeHRM demo and automationexercise.com. Please do not automate real shopping sites such as Myntra or Amazon: their
           terms forbid it and they block bots.
         </p>

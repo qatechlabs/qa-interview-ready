@@ -112,6 +112,8 @@ export interface Scenario {
   starter: string;
   /** Starter project for multi-file (framework) scenarios; overrides `starter`. */
   files?: Record<string, string>;
+  /** An open workspace: the learner builds a whole framework (config to tests) and is graded against a rubric. */
+  workspace?: boolean;
   /** Minimum number of passing assertions the learner's own test must make. */
   minAssertions: number;
   checks: Check[];
@@ -1477,9 +1479,98 @@ test('POST verifyLogin without email is a 400', async ({ request }) => {
   },
 ];
 
+// ---------------- Framework workspaces: build everything from scratch ----------------
+const specFiles = (c: CheckContext) => Object.entries(c.files).filter(([f]) => f.startsWith("tests/") && /\.(spec|test)\.[jt]s$/.test(f));
+const stripComments = (src: string) => src.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+const cfg = (c: CheckContext) => stripComments(c.files["playwright.config.ts"] || "");
+const fixturesSrc = (c: CheckContext) => Object.entries(c.files).filter(([f]) => /(^|\/)fixtures?(\.ts|\/[^/]+\.ts)$/.test(f)).map(([, s]) => stripComments(s)).join("\n");
+
+/** The interviewer's framework review, the same for every application. */
+const FRAMEWORK_RUBRIC: Check[] = [
+  { label: "All tests passed (at least two spec files, two tests each)", test: (c) => c.result.ok && specFiles(c).length >= 2 && c.result.tests.length >= 4 && c.result.tests.every((t) => t.ok) },
+  { label: "playwright.config.ts uses defineConfig with testDir and baseURL", test: (c) => /defineConfig\s*\(/.test(cfg(c)) && /testDir\s*:/.test(cfg(c)) && /baseURL\s*:/.test(cfg(c)) },
+  { label: "The base URL comes from the environment (process.env.BASE_URL) with a default", test: (c) => /process\.env\.\w*BASE_URL\w*\s*(\|\||\?\?)/.test(cfg(c)) },
+  { label: "Config is CI-ready: retries, a reporter and trace or screenshot on failure", test: (c) => /retries\s*:/.test(cfg(c)) && /reporter\s*:/.test(cfg(c)) && /(trace|screenshot|video)\s*:/.test(cfg(c)) },
+  { label: "At least two page objects under pages/", test: (c) => Object.entries(c.files).filter(([f, s]) => f.startsWith("pages/") && /export\s+(default\s+)?class/.test(s)).length >= 2 },
+  { label: "A fixtures file extends test and the specs import test from it", test: (c) => /\.extend\s*[<(]/.test(fixturesSrc(c)) && specFiles(c).length > 0 && specFiles(c).every(([, s]) => /from\s+['"][^'"]*fixtures/.test(s)) },
+  { label: "Test data or helpers live in their own module (data/, utils/ or helpers/)", test: (c) => Object.keys(c.files).some((f) => /^(data|utils|helpers|config)\//.test(f)) },
+  { label: "Specs contain no raw locators (page.locator / getBy / click / fill)", test: (c) => specFiles(c).every(([, s]) => !/page\s*\.\s*(getBy\w+|locator|click|fill|goto)\s*\(/.test(stripComments(s))) },
+  { label: "Tests are grouped or tagged (test.describe or @smoke / @regression tags)", test: (c) => specFiles(c).some(([, s]) => /test\.describe\s*\(/.test(s) || /@(smoke|regression|sanity|critical)\b/.test(s)) },
+  { label: "No hard waits (waitForTimeout) anywhere", test: (c) => !/waitForTimeout\s*\(/.test(stripComments(c.code)) },
+  { label: "README explains how to install and run the suite", test: (c) => /playwright\s+(test|install)|npm\s+(test|run)/i.test(c.files["README.md"] || "") },
+];
+
+const workspaceBrief = (appName: string, extra: string) =>
+  `"Here is an empty folder and ${appName}. Set up the automation framework you would put in front of a client: Playwright config, page objects, fixtures, test data, a couple of production-grade tests, and a README. Treat it like a real repo, not an exercise. ${extra}"`;
+
+const WORKSPACE_CRITERIA = [
+  "playwright.config.ts you write yourself: testDir, baseURL from an environment variable with a default, retries, reporter, trace/screenshot on failure.",
+  "pages/ with at least two page objects; fixtures.ts that extends test (for example a logged-in page or a ready page object).",
+  "tests/ with at least two spec files and four tests in total, using only fixtures and page objects, grouped with test.describe or tagged @smoke/@regression.",
+  "data/ or utils/ for test data and helpers; a README that says how to install and run.",
+  "Everything green: in the browser for the practice apps, and on GitHub Actions with your own config for every app.",
+];
+
+const WORKSPACE_HINTS = [
+  "Start with playwright.config.ts: import { defineConfig } from '@playwright/test'; export default defineConfig({ testDir: './tests', use: { baseURL: process.env.BASE_URL || '…' } }). On GitHub the runner sets BASE_URL for you.",
+  "Create files with + New: pages/login.page.ts, fixtures.ts, data/users.ts, tests/login.spec.ts, tests/…spec.ts, README.md.",
+  "fixtures.ts: export const test = base.extend<{ app: AppPages }>({ app: async ({ page }, use) => { … await use(…) } }); export { expect } from '@playwright/test'. Specs import { test, expect } from '../fixtures'.",
+  "A spec should read like a test case: await app.login.loginAs(users.standard); await expect(app.inventory.title).toHaveText('Products'). Keep every locator inside a page object.",
+  "Run on GitHub uses your config: the workflow runs npx playwright test --config <your folder>/playwright.config.ts. The in-browser runner ignores the config file but checks it.",
+];
+
+const workspace = (app: LabAppId, id: string, name: string, extra: string, readme: string, free = false): Scenario => ({
+  id,
+  app,
+  title: `Build the ${name} framework from scratch`,
+  level: "Senior",
+  minutes: 90,
+  free,
+  workspace: true,
+  story: workspaceBrief(name, extra),
+  criteria: WORKSPACE_CRITERIA,
+  hints: WORKSPACE_HINTS,
+  starter: "",
+  files: {
+    "README.md": readme,
+  },
+  minAssertions: 4,
+  skills: ["Framework design", "Config", "Page Objects", "Fixtures", "Test data", "CI"],
+  checks: FRAMEWORK_RUBRIC,
+});
+
+const readmeFor = (name: string, site: string, notes: string) => `# ${name} automation framework
+
+Your framework for ${site}. Build it the way you would for a client:
+
+- \`playwright.config.ts\`: testDir, baseURL from \`process.env.BASE_URL\`, retries, reporter, trace on failure
+- \`pages/\`: one class per page or component
+- \`fixtures.ts\`: \`test.extend\` with the objects your tests need
+- \`data/\` or \`utils/\`: users, products, helpers
+- \`tests/\`: specs that read like test cases, grouped with \`test.describe\` or tagged \`@smoke\`
+
+${notes}
+
+<!-- Replace this README with real install/run instructions. The rubric checks that it mentions how to run the suite. -->
+`;
+
+export const WORKSPACES: Scenario[] = [
+  workspace("swagshop", "workspace-swagshop", "SwagShop", "Start with login and the cart; the checkout maths is where the bugs live.", readmeFor("SwagShop", "the SwagShop practice store (Saucedemo-style)", "Users: standard_user, locked_out_user, problem_user, performance_glitch_user / secret_sauce. Runs in the browser and on GitHub Actions."), true),
+  workspace("peopledesk", "workspace-peopledesk", "PeopleDesk HR", "Admin login, employee CRUD with cleanup, leave validation. Show me how you keep test data isolated.", readmeFor("PeopleDesk HR", "the PeopleDesk practice portal (OrangeHRM-style)", "Login: Admin / admin123. Employee data resets when the page reloads, so each test should create what it needs.")),
+  workspace("trendkart", "workspace-trendkart", "TrendKart", "Search, filters, sorting and the bag; make the suite data-driven.", readmeFor("TrendKart", "the TrendKart practice marketplace (Myntra-style)", "No login. Prices are rupees with commas, so you will want a parsePrice helper.")),
+  workspace("saucedemo", "workspace-saucedemo", "Sauce Demo", "This is the real saucedemo.com. Your config must work on CI, not only on your laptop.", readmeFor("Sauce Demo", "https://www.saucedemo.com", "Users: standard_user, locked_out_user, problem_user, performance_glitch_user / secret_sauce. data-test attributes are the stable hooks."), true),
+  workspace("orangehrm", "workspace-orangehrm", "OrangeHRM", "This is the real OrangeHRM demo. It is slow and shared with the whole internet, so your design must cope with that.", readmeFor("OrangeHRM", "https://opensource-demo.orangehrmlive.com", "Login: Admin / admin123. The demo resets regularly; use unique names (Date.now()) for anything you create. Login lives at /web/index.php/auth/login.")),
+  workspace("automationexercise", "workspace-automationexercise", "AutomationExercise", "This is the real automationexercise.com: ads, modals, a UI and a JSON API. I want UI and API tests in the same framework.", readmeFor("AutomationExercise", "https://automationexercise.com", "Register your own users with unique emails and delete them afterwards. The API answers with text/html, so parse JSON from the body text.")),
+];
+
 export const MAIN_FILE = "tests/example.spec.ts";
 export const starterFiles = (s: Scenario): Record<string, string> => (s.files ? { ...s.files } : { [MAIN_FILE]: s.starter });
 export const isFramework = (s: Scenario) => !!s.files;
+export const isWorkspace = (s: Scenario) => !!s.workspace;
 
-export const getScenario = (id: string) => SCENARIOS.find((s) => s.id === id);
+/** Task scenarios plus the open workspaces. */
+export const ALL_SCENARIOS: Scenario[] = [...SCENARIOS, ...WORKSPACES];
+export const getScenario = (id: string) => ALL_SCENARIOS.find((s) => s.id === id);
+/** Task scenarios of one app (workspaces are listed separately). */
 export const scenariosFor = (app: LabAppId) => SCENARIOS.filter((s) => s.app === app);
+export const workspaceFor = (app: LabAppId) => WORKSPACES.find((s) => s.app === app);
