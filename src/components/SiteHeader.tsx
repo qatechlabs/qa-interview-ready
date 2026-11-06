@@ -8,6 +8,7 @@ export async function SiteHeader() {
     { href: "/#levels", label: "Levels" },
     { href: "/practice", label: "Flashcards" },
     { href: "/mock", label: "Mock interview" },
+    { href: "/labs", label: "Live labs" },
     { href: "/search", label: "Search" },
     { href: "/progress", label: "Progress" },
   ];
@@ -33,9 +34,9 @@ export async function SiteHeader() {
           )}
         </div>
       </div>
-      <nav className="flex justify-around border-t px-2 text-sm sm:hidden" style={{ borderColor: "var(--border)" }}>
+      <nav className="flex justify-around overflow-x-auto border-t px-2 text-sm sm:hidden" style={{ borderColor: "var(--border)" }}>
         {nav.map((n) => (
-          <Link key={n.href} href={n.href} className="whitespace-nowrap px-1.5 py-2 muted">{n.label.replace(" interview", "")}</Link>
+          <Link key={n.href} href={n.href} className="whitespace-nowrap px-1.5 py-2 muted">{n.label === "Live labs" ? "Labs" : n.label.replace(" interview", "")}</Link>
         ))}
       </nav>
     </header>

@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SwagShop</title>
+<meta name="robots" content="noindex">
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f4f5f7;color:#132322}
+  header{background:#fff;border-bottom:1px solid #dfe3e8;padding:10px 16px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:5}
+  .brand{font-weight:800;font-size:20px;letter-spacing:.5px;color:#127a6f;flex:1;text-align:center}
+  button,.btn{font:inherit;cursor:pointer;border-radius:6px;border:1px solid #127a6f;background:#127a6f;color:#fff;padding:8px 14px;font-weight:600}
+  button.secondary{background:#fff;color:#127a6f}
+  button.danger{background:#fff;color:#c0392b;border-color:#c0392b}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  input,select{font:inherit;padding:9px 10px;border:1px solid #c6ccd2;border-radius:6px;width:100%;background:#fff}
+  input.invalid{border-color:#c0392b;background:#fff5f5}
+  main{max-width:980px;margin:0 auto;padding:16px}
+  .login{max-width:360px;margin:40px auto;background:#fff;padding:24px;border-radius:10px;border:1px solid #dfe3e8}
+  .login h1{text-align:center;color:#127a6f;margin:0 0 18px}
+  .login form>*{margin-bottom:12px}
+  .error{background:#fde8e8;color:#9b1c1c;border:1px solid #f5b5b5;border-radius:6px;padding:10px 12px;display:flex;justify-content:space-between;gap:8px}
+  .error button{background:none;border:none;color:#9b1c1c;padding:0}
+  .hint{font-size:13px;color:#56656f;background:#fff;border:1px dashed #c6ccd2;border-radius:8px;padding:10px;max-width:360px;margin:12px auto}
+  .bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;gap:10px}
+  .bar h2{margin:0;font-size:18px}
+  .bar select{width:auto}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:14px}
+  .inventory_item{background:#fff;border:1px solid #dfe3e8;border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:8px}
+  .thumb{height:90px;border-radius:8px;display:grid;place-items:center;font-size:40px;background:#e8f4f2}
+  .inventory_item_name{font-weight:700;color:#127a6f;cursor:pointer;background:none;border:none;padding:0;text-align:left;font-size:15px}
+  .inventory_item_desc{font-size:13px;color:#56656f;flex:1}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .inventory_item_price{font-weight:700}
+  .cart-link{position:relative;background:none;border:none;color:#127a6f;font-size:22px;padding:4px 8px}
+  .shopping_cart_badge{position:absolute;top:-4px;right:-4px;background:#c0392b;color:#fff;border-radius:999px;font-size:11px;min-width:18px;height:18px;display:grid;place-items:center;font-weight:700}
+  .menu{position:absolute;top:52px;left:8px;background:#fff;border:1px solid #dfe3e8;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);display:flex;flex-direction:column;min-width:180px}
+  .menu a{padding:10px 14px;color:#132322;text-decoration:none;cursor:pointer}
+  .menu a:hover{background:#f4f5f7}
+  .panel{background:#fff;border:1px solid #dfe3e8;border-radius:10px;padding:16px}
+  .cart_item{display:flex;gap:12px;align-items:center;border-bottom:1px solid #eef0f2;padding:12px 0}
+  .cart_item:last-child{border-bottom:none}
+  .cart_quantity{border:1px solid #c6ccd2;border-radius:4px;padding:2px 8px}
+  .form{max-width:420px}
+  .form>*{margin-bottom:12px}
+  .summary_info>div{margin:6px 0}
+  .summary_total_label{font-weight:800;font-size:18px}
+  .complete{text-align:center;padding:30px}
+  .complete-header{color:#127a6f}
+  .actions{display:flex;gap:10px;justify-content:flex-end;margin-top:14px}
+  .back{background:none;border:none;color:#127a6f;padding:0;font-weight:600}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+(function () {
+  "use strict";
+  var NS = "lab:swagshop:";
+  var PASSWORD = "secret_sauce";
+  var USERS = ["standard_user", "locked_out_user", "problem_user", "performance_glitch_user"];
+  var PRODUCTS = [
+    { id: 0, name: "Trail Runner Backpack", price: 29.99, icon: "🎒", desc: "Water-resistant 20L pack with a padded laptop sleeve." },
+    { id: 1, name: "Night Ride Bike Light", price: 9.99, icon: "🔦", desc: "USB rechargeable, three modes, clips onto any handlebar." },
+    { id: 2, name: "Classic Cotton Tee", price: 15.99, icon: "👕", desc: "Soft ring-spun cotton with a small embroidered logo." },
+    { id: 3, name: "Fleece Zip Jacket", price: 49.99, icon: "🧥", desc: "Mid-weight fleece for cold mornings and late commits." },
+    { id: 4, name: "Baby Romper", price: 7.99, icon: "🍼", desc: "Snap buttons, breathable fabric, tested by tiny QA engineers." },
+    { id: 5, name: "Red Test Hoodie", price: 15.99, icon: "🟥", desc: "A bold hoodie for engineers who like their builds green." }
+  ];
+
+  function get(k, d) { try { var v = sessionStorage.getItem(NS + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } }
+  function set(k, v) { try { sessionStorage.setItem(NS + k, JSON.stringify(v)); } catch (e) {} }
+  function del(k) { try { sessionStorage.removeItem(NS + k); } catch (e) {} }
+  function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+  function money(n) { return "$" + n.toFixed(2); }
+  function slug(p) { return p.name.toLowerCase().replace(/[^a-z0-9]+/g, "-"); }
+
+  var ui = { menu: false, loginError: "", checkoutError: "", loggingIn: false };
+  var app = document.getElementById("app");
+
+  function user() { return get("user", null); }
+  function cart() { return get("cart", []); }
+  function route() { return (location.hash.replace(/^#/, "") || "/").split("?")[0]; }
+  function go(path) { location.hash = path; }
+
+  window.__lab = {
+    get user() { return user(); },
+    get cart() { return cart(); },
+    get lastOrder() { return get("lastOrder", null); },
+    reset: function () { Object.keys(sessionStorage).forEach(function (k) { if (k.indexOf(NS) === 0) sessionStorage.removeItem(k); }); }
+  };
+
+  function header() {
+    var c = cart().length;
+    return '<header>' +
+      '<button class="secondary" id="react-burger-menu-btn" aria-label="Open Menu" data-test="open-menu">☰</button>' +
+      '<div class="brand">SwagShop</div>' +
+      '<button class="cart-link" aria-label="Shopping cart" data-test="shopping-cart-link">🛒' +
+      (c ? '<span class="shopping_cart_badge" data-test="shopping-cart-badge">' + c + '</span>' : '') + '</button>' +
+      (ui.menu ? '<nav class="menu" aria-label="Main menu">' +
+        '<a role="link" id="inventory_sidebar_link" data-test="inventory-sidebar-link" data-go="/inventory">All Items</a>' +
+        '<a role="link" id="reset_sidebar_link" data-test="reset-sidebar-link" data-action="reset">Reset App State</a>' +
+        '<a role="link" id="logout_sidebar_link" data-test="logout-sidebar-link" data-action="logout">Logout</a>' +
+        '</nav>' : '') +
+      '</header>';
+  }
+
+  function loginView() {
+    return '<div class="login">' +
+      '<h1>SwagShop</h1>' +
+      '<form id="login-form" novalidate>' +
+      '<input id="user-name" name="user-name" data-test="username" placeholder="Username" autocomplete="off" aria-label="Username"' + (ui.loginError ? ' class="invalid"' : '') + '>' +
+      '<input id="password" name="password" type="password" data-test="password" placeholder="Password" aria-label="Password"' + (ui.loginError ? ' class="invalid"' : '') + '>' +
+      (ui.loginError ? '<div class="error" data-test="error" role="alert"><span>' + esc(ui.loginError) + '</span><button type="button" class="error-button" data-test="error-button" aria-label="Dismiss error">✕</button></div>' : '') +
+      '<button type="submit" id="login-button" data-test="login-button" style="width:100%"' + (ui.loggingIn ? ' disabled' : '') + '>' + (ui.loggingIn ? 'Logging in…' : 'Login') + '</button>' +
+      '</form></div>' +
+      '<div class="hint"><b>Accepted usernames:</b> ' + USERS.join(", ") + '<br><b>Password for all users:</b> ' + PASSWORD + '</div>';
+  }
+
+  function sortList(list, mode) {
+    var l = list.slice();
+    if (user() === "problem_user") return l; // sorting is intentionally broken for this user
+    if (mode === "az") l.sort(function (a, b) { return a.name.localeCompare(b.name); });
+    if (mode === "za") l.sort(function (a, b) { return b.name.localeCompare(a.name); });
+    if (mode === "lohi") l.sort(function (a, b) { return a.price - b.price || a.name.localeCompare(b.name); });
+    if (mode === "hilo") l.sort(function (a, b) { return b.price - a.price || a.name.localeCompare(b.name); });
+    return l;
+  }
+
+  function addRemoveButton(p) {
+    var inCart = cart().indexOf(p.id) >= 0;
+    return inCart
+      ? '<button class="danger" data-test="remove-' + slug(p) + '" data-remove="' + p.id + '">Remove</button>'
+      : '<button data-test="add-to-cart-' + slug(p) + '" data-add="' + p.id + '">Add to cart</button>';
+  }
+
+  function inventoryView() {
+    var mode = get("sort", "az");
+    var items = sortList(PRODUCTS, mode).map(function (p) {
+      return '<div class="inventory_item" data-test="inventory-item">' +
+        '<div class="thumb" aria-hidden="true">' + (user() === "problem_user" ? "🐶" : p.icon) + '</div>' +
+        '<button class="inventory_item_name" data-test="inventory-item-name" data-open="' + p.id + '">' + esc(p.name) + '</button>' +
+        '<div class="inventory_item_desc" data-test="inventory-item-desc">' + esc(p.desc) + '</div>' +
+        '<div class="row"><span class="inventory_item_price" data-test="inventory-item-price">' + money(p.price) + '</span>' + addRemoveButton(p) + '</div>' +
+        '</div>';
+    }).join("");
+    return header() + '<main><div class="bar"><h2 class="title" data-test="title">Products</h2>' +
+      '<label>Sort <select class="product_sort_container" data-test="product-sort-container" aria-label="Sort products">' +
+      [["az", "Name (A to Z)"], ["za", "Name (Z to A)"], ["lohi", "Price (low to high)"], ["hilo", "Price (high to low)"]].map(function (o) {
+        return '<option value="' + o[0] + '"' + (o[0] === mode ? " selected" : "") + '>' + o[1] + '</option>';
+      }).join("") + '</select></label></div><div class="grid inventory_list" data-test="inventory-list">' + items + '</div></main>';
+  }
+
+  function itemView(id) {
+    var p = PRODUCTS.filter(function (x) { return String(x.id) === id; })[0];
+    if (!p) return header() + '<main><p>Item not found.</p></main>';
+    return header() + '<main><button class="back" data-test="back-to-products" data-go="/inventory">← Back to products</button>' +
+      '<div class="panel" style="margin-top:12px;display:flex;gap:16px;align-items:center">' +
+      '<div class="thumb" style="width:140px;height:140px;font-size:64px" aria-hidden="true">' + p.icon + '</div>' +
+      '<div style="flex:1"><h2 class="inventory_details_name" data-test="inventory-item-name">' + esc(p.name) + '</h2>' +
+      '<p data-test="inventory-item-desc">' + esc(p.desc) + '</p>' +
+      '<p class="inventory_details_price" data-test="inventory-item-price"><b>' + money(p.price) + '</b></p>' + addRemoveButton(p) + '</div></div></main>';
+  }
+
+  function cartView() {
+    var rows = cart().map(function (id) {
+      var p = PRODUCTS[id];
+      return '<div class="cart_item" data-test="inventory-item"><span class="cart_quantity" data-test="item-quantity">1</span>' +
+        '<div style="flex:1"><div class="inventory_item_name" data-test="inventory-item-name">' + esc(p.name) + '</div>' +
+        '<div class="inventory_item_price" data-test="inventory-item-price">' + money(p.price) + '</div></div>' +
+        '<button class="danger" data-test="remove-' + slug(p) + '" data-remove="' + p.id + '">Remove</button></div>';
+    }).join("");
+    return header() + '<main><div class="bar"><h2 class="title" data-test="title">Your Cart</h2></div>' +
+      '<div class="panel cart_list" data-test="cart-list">' + (rows || '<p class="empty" data-test="cart-empty">Your cart is empty.</p>') + '</div>' +
+      '<div class="actions"><button class="secondary" id="continue-shopping" data-test="continue-shopping" data-go="/inventory">Continue Shopping</button>' +
+      '<button id="checkout" data-test="checkout" data-go="/checkout-step-one">Checkout</button></div></main>';
+  }
+
+  function stepOneView() {
+    var f = get("info", { first: "", last: "", zip: "" });
+    return header() + '<main><div class="bar"><h2 class="title" data-test="title">Checkout: Your Information</h2></div>' +
+      '<form class="panel form" id="info-form" novalidate>' +
+      '<input id="first-name" data-test="firstName" placeholder="First Name" aria-label="First Name" value="' + esc(f.first) + '">' +
+      '<input id="last-name" data-test="lastName" placeholder="Last Name" aria-label="Last Name" value="' + esc(f.last) + '">' +
+      '<input id="postal-code" data-test="postalCode" placeholder="Zip/Postal Code" aria-label="Zip/Postal Code" value="' + esc(f.zip) + '">' +
+      (ui.checkoutError ? '<div class="error" data-test="error" role="alert"><span>' + esc(ui.checkoutError) + '</span></div>' : '') +
+      '<div class="actions"><button type="button" class="secondary" id="cancel" data-test="cancel" data-go="/cart">Cancel</button>' +
+      '<button type="submit" id="continue" data-test="continue">Continue</button></div></form></main>';
+  }
+
+  function totals() {
+    var sub = cart().reduce(function (s, id) { return s + PRODUCTS[id].price; }, 0);
+    var tax = Math.round(sub * 0.08 * 100) / 100;
+    return { sub: sub, tax: tax, total: Math.round((sub + tax) * 100) / 100 };
+  }
+
+  function stepTwoView() {
+    var t = totals();
+    var rows = cart().map(function (id) {
+      var p = PRODUCTS[id];
+      return '<div class="cart_item" data-test="inventory-item"><span class="cart_quantity" data-test="item-quantity">1</span><div style="flex:1">' +
+        '<div class="inventory_item_name" data-test="inventory-item-name">' + esc(p.name) + '</div></div>' +
+        '<div class="inventory_item_price" data-test="inventory-item-price">' + money(p.price) + '</div></div>';
+    }).join("");
+    return header() + '<main><div class="bar"><h2 class="title" data-test="title">Checkout: Overview</h2></div>' +
+      '<div class="panel">' + rows + '<div class="summary_info" style="margin-top:12px">' +
+      '<div class="summary_subtotal_label" data-test="subtotal-label">Item total: ' + money(t.sub) + '</div>' +
+      '<div class="summary_tax_label" data-test="tax-label">Tax: ' + money(t.tax) + '</div>' +
+      '<div class="summary_total_label" data-test="total-label">Total: ' + money(t.total) + '</div></div></div>' +
+      '<div class="actions"><button class="secondary" id="cancel" data-test="cancel" data-go="/inventory">Cancel</button>' +
+      '<button id="finish" data-test="finish" data-action="finish">Finish</button></div></main>';
+  }
+
+  function completeView() {
+    return header() + '<main><div class="bar"><h2 class="title" data-test="title">Checkout: Complete!</h2></div>' +
+      '<div class="panel complete"><div style="font-size:48px">✅</div>' +
+      '<h2 class="complete-header" data-test="complete-header">Thank you for your order!</h2>' +
+      '<p class="complete-text" data-test="complete-text">Your order has been dispatched and will arrive just as fast as the pony can get there!</p>' +
+      '<button id="back-to-products" data-test="back-to-products" data-go="/inventory">Back Home</button></div></main>';
+  }
+
+  function render() {
+    var r = route();
+    var u = user();
+    if (r !== "/" && !u) {
+      ui.loginError = "Error: You can only access '" + r + "' when you are logged in.";
+      location.replace("#/");
+      return;
+    }
+    var html;
+    if (r === "/") html = loginView();
+    else if (r === "/inventory") html = inventoryView();
+    else if (r.indexOf("/item/") === 0) html = itemView(r.slice(6));
+    else if (r === "/cart") html = cartView();
+    else if (r === "/checkout-step-one") html = stepOneView();
+    else if (r === "/checkout-step-two") html = stepTwoView();
+    else if (r === "/checkout-complete") html = completeView();
+    else html = header() + '<main><h2>Page not found</h2></main>';
+    app.innerHTML = html;
+    var titles = { "/": "SwagShop", "/inventory": "SwagShop | Products", "/cart": "SwagShop | Cart" };
+    document.title = titles[r] || "SwagShop";
+  }
+
+  app.addEventListener("click", function (e) {
+    var t = e.target.closest("[data-go],[data-add],[data-remove],[data-open],[data-action],#react-burger-menu-btn,.cart-link,.error-button");
+    if (!t) { if (ui.menu) { ui.menu = false; render(); } return; }
+    if (t.id === "react-burger-menu-btn") { ui.menu = !ui.menu; return render(); }
+    ui.menu = false;
+    if (t.classList.contains("cart-link")) return go("/cart");
+    if (t.classList.contains("error-button")) { ui.loginError = ""; return render(); }
+    if (t.dataset.go) { ui.checkoutError = ""; if (route() === t.dataset.go) return render(); return go(t.dataset.go); }
+    if (t.dataset.open) return go("/item/" + t.dataset.open);
+    if (t.dataset.add) { var c = cart(); var id = +t.dataset.add; if (c.indexOf(id) < 0) c.push(id); set("cart", c); return render(); }
+    if (t.dataset.remove) { set("cart", cart().filter(function (x) { return x !== +t.dataset.remove; })); return render(); }
+    if (t.dataset.action === "logout") { del("user"); del("cart"); del("info"); ui.loginError = ""; return go("/"); }
+    if (t.dataset.action === "reset") { set("cart", []); return render(); }
+    if (t.dataset.action === "finish") {
+      var t2 = totals();
+      set("lastOrder", { items: cart().map(function (id) { return PRODUCTS[id].name; }), total: t2.total, info: get("info", null), at: Date.now() });
+      set("cart", []); del("info");
+      return go("/checkout-complete");
+    }
+  });
+
+  app.addEventListener("change", function (e) {
+    if (e.target.matches("[data-test=product-sort-container]")) { set("sort", e.target.value); render(); }
+  });
+
+  app.addEventListener("submit", function (e) {
+    e.preventDefault();
+    if (e.target.id === "login-form") {
+      var name = document.getElementById("user-name").value.trim();
+      var pw = document.getElementById("password").value;
+      if (!name) ui.loginError = "Error: Username is required";
+      else if (!pw) ui.loginError = "Error: Password is required";
+      else if (USERS.indexOf(name) < 0 || pw !== PASSWORD) ui.loginError = "Error: Username and password do not match any user in this service";
+      else if (name === "locked_out_user") ui.loginError = "Error: Sorry, this user has been locked out.";
+      else {
+        ui.loginError = "";
+        var finish = function () { ui.loggingIn = false; set("user", name); go("/inventory"); };
+        if (name === "performance_glitch_user") { ui.loggingIn = true; render(); setTimeout(finish, 2500); return; }
+        return finish();
+      }
+      render();
+      var u = document.getElementById("user-name"); u.value = name;
+      document.getElementById("password").value = pw;
+    }
+    if (e.target.id === "info-form") {
+      var f = { first: document.getElementById("first-name").value.trim(), last: document.getElementById("last-name").value.trim(), zip: document.getElementById("postal-code").value.trim() };
+      set("info", f);
+      if (!f.first) ui.checkoutError = "Error: First Name is required";
+      else if (!f.last) ui.checkoutError = "Error: Last Name is required";
+      else if (!f.zip) ui.checkoutError = "Error: Postal Code is required";
+      else { ui.checkoutError = ""; return go("/checkout-step-two"); }
+      render();
+    }
+  });
+
+  window.addEventListener("hashchange", render);
+  render();
+})();
+</script>
+</body>
+</html>

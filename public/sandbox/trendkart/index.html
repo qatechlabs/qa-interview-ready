@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TrendKart | Fashion Store</title>
+<meta name="robots" content="noindex">
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#fff;color:#282c3f}
+  a{color:inherit;text-decoration:none}
+  button{font:inherit;cursor:pointer;border-radius:4px;border:1px solid #e8336d;background:#e8336d;color:#fff;padding:9px 16px;font-weight:700}
+  button.ghost{background:#fff;color:#282c3f;border-color:#d4d5d9}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  input,select{font:inherit;padding:9px 10px;border:1px solid #d4d5d9;border-radius:4px;background:#fff;color:inherit}
+  header{display:flex;align-items:center;gap:14px;padding:10px 16px;box-shadow:0 2px 8px rgba(0,0,0,.06);position:sticky;top:0;background:#fff;z-index:5}
+  .logo{font-weight:900;font-size:22px;color:#e8336d;letter-spacing:-.5px;cursor:pointer}
+  header form{flex:1;display:flex;max-width:520px}
+  header input{flex:1;background:#f5f5f6;border:none}
+  .icons{display:flex;gap:16px;margin-left:auto}
+  .icons button{background:none;border:none;color:#282c3f;padding:4px;position:relative;font-weight:600;font-size:13px}
+  .count{position:absolute;top:-6px;right:-8px;background:#e8336d;color:#fff;border-radius:999px;min-width:18px;height:18px;font-size:11px;display:grid;place-items:center}
+  main{max-width:1100px;margin:0 auto;padding:16px}
+  .cats{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-top:12px}
+  .cat{border:1px solid #eaeaec;border-radius:8px;padding:18px;text-align:center;cursor:pointer;font-weight:700}
+  .cat .e{font-size:40px}
+  .layout{display:flex;gap:18px}
+  .filters{width:190px;flex-shrink:0;border-right:1px solid #eaeaec;padding-right:14px}
+  .filters h3{font-size:13px;text-transform:uppercase;letter-spacing:.5px;margin:14px 0 8px}
+  .filters label{display:flex;gap:8px;align-items:center;font-size:14px;margin:6px 0;cursor:pointer}
+  .results{flex:1;min-width:0}
+  .bar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+  .bar h1{font-size:16px;margin:0}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px}
+  .product-base{border:1px solid #eaeaec;border-radius:8px;overflow:hidden;cursor:pointer;background:#fff}
+  .product-base .img{height:150px;display:grid;place-items:center;font-size:56px;background:#f5f5f6}
+  .product-base .info{padding:10px}
+  .product-brand{font-weight:800;font-size:15px}
+  .product-product{font-size:13px;color:#535766;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .product-price{margin-top:6px;font-size:14px}
+  .product-discountedPrice{font-weight:800}
+  .product-strike{text-decoration:line-through;color:#7e818c;font-size:12px;margin-left:4px}
+  .product-discountPercentage{color:#ff905a;font-size:12px;margin-left:4px;font-weight:700}
+  .rating{font-size:12px;color:#03a685;font-weight:700}
+  .spinner{padding:40px;text-align:center;color:#7e818c}
+  .pdp{display:flex;gap:24px;flex-wrap:wrap}
+  .pdp .img{flex:1;min-width:260px;height:320px;display:grid;place-items:center;font-size:120px;background:#f5f5f6;border-radius:8px}
+  .pdp .details{flex:1;min-width:260px}
+  .sizes{display:flex;gap:10px;margin:10px 0}
+  .size-buttons-size-button{width:48px;height:48px;border-radius:999px;background:#fff;color:#282c3f;border:1px solid #bfc0c6;padding:0}
+  .size-buttons-size-button.selected{border-color:#e8336d;color:#e8336d}
+  .size-error{color:#e8336d;font-size:13px;font-weight:600}
+  .bag-item{display:flex;gap:12px;border:1px solid #eaeaec;border-radius:8px;padding:12px;margin-bottom:10px;align-items:center}
+  .bag-item .img{width:70px;height:80px;display:grid;place-items:center;font-size:36px;background:#f5f5f6;border-radius:6px}
+  .price-details{border:1px solid #eaeaec;border-radius:8px;padding:14px;min-width:280px}
+  .price-row{display:flex;justify-content:space-between;margin:8px 0;font-size:14px}
+  .price-total{font-weight:800;border-top:1px solid #eaeaec;padding-top:10px}
+  .coupon{display:flex;gap:8px;margin-bottom:10px}
+  .msg-ok{color:#03a685;font-size:13px;font-weight:600}
+  .msg-err{color:#e8336d;font-size:13px;font-weight:600}
+  .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#282c3f;color:#fff;padding:10px 16px;border-radius:6px;font-size:14px;z-index:9}
+  .empty{text-align:center;padding:40px;color:#7e818c}
+  @media (max-width:600px){.layout{display:block}.filters{width:auto;border-right:none;padding-right:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));column-gap:12px;margin-bottom:12px}.filters h3{grid-column:1/-1;margin:8px 0 2px}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+(function () {
+  "use strict";
+  var NS = "lab:trendkart:";
+  var P = [
+    { id: 101, brand: "Roadway", name: "Men Slim Fit Casual Shirt", cat: "men", type: "shirt", mrp: 1499, price: 749, rating: 4.2, icon: "👔", oos: ["XL"] },
+    { id: 102, brand: "Urbanline", name: "Men Checked Cotton Shirt", cat: "men", type: "shirt", mrp: 1999, price: 1199, rating: 4.4, icon: "👔", oos: [] },
+    { id: 103, brand: "Nordic Thread", name: "Men Linen Formal Shirt", cat: "men", type: "shirt", mrp: 2599, price: 1819, rating: 4.1, icon: "👔", oos: ["S"] },
+    { id: 104, brand: "Roadway", name: "Men Printed Round Neck T-shirt", cat: "men", type: "tshirt", mrp: 799, price: 399, rating: 3.9, icon: "👕", oos: [] },
+    { id: 105, brand: "Urbanline", name: "Men Slim Fit Jeans", cat: "men", type: "jeans", mrp: 2499, price: 1374, rating: 4.3, icon: "👖", oos: ["M"] },
+    { id: 106, brand: "Kalakari", name: "Women Floral Print Kurta", cat: "women", type: "kurta", mrp: 1899, price: 949, rating: 4.5, icon: "👗", oos: [] },
+    { id: 107, brand: "Nordic Thread", name: "Women Oversized Shirt", cat: "women", type: "shirt", mrp: 1599, price: 959, rating: 4.0, icon: "👚", oos: ["L"] },
+    { id: 108, brand: "Kalakari", name: "Women Cotton Straight Kurta", cat: "women", type: "kurta", mrp: 1299, price: 779, rating: 4.2, icon: "👗", oos: [] },
+    { id: 109, brand: "Urbanline", name: "Women High-Rise Jeans", cat: "women", type: "jeans", mrp: 2299, price: 1379, rating: 4.1, icon: "👖", oos: [] },
+    { id: 110, brand: "Roadway", name: "Women Striped Shirt", cat: "women", type: "shirt", mrp: 1199, price: 599, rating: 3.8, icon: "👚", oos: [] },
+    { id: 111, brand: "Stride", name: "Men Running Shoes", cat: "men", type: "shoes", mrp: 3999, price: 1999, rating: 4.6, icon: "👟", oos: [] },
+    { id: 112, brand: "Stride", name: "Women Training Shoes", cat: "women", type: "shoes", mrp: 3499, price: 2449, rating: 4.3, icon: "👟", oos: ["S"] }
+  ];
+  var SIZES = ["S", "M", "L", "XL"];
+  var COUPONS = { TRENDY10: { pct: 10, min: 0 }, FLAT300: { flat: 300, min: 1499 } };
+  var PRICE_BANDS = [["0-999", "₹0 to ₹999", 0, 999], ["1000-1999", "₹1000 to ₹1999", 1000, 1999], ["2000-4999", "₹2000 to ₹4999", 2000, 4999]];
+
+  function get(k, d) { try { var v = sessionStorage.getItem(NS + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } }
+  function set(k, v) { try { sessionStorage.setItem(NS + k, JSON.stringify(v)); } catch (e) {} }
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+  function inr(n) { return "₹" + Math.round(n).toLocaleString("en-IN"); }
+  function off(p) { return Math.round((1 - p.price / p.mrp) * 100); }
+  function byId(id) { return P.filter(function (p) { return p.id === +id; })[0]; }
+
+  function parse() {
+    var h = location.hash.replace(/^#/, "") || "/";
+    var i = h.indexOf("?");
+    var path = i < 0 ? h : h.slice(0, i);
+    var q = {};
+    if (i >= 0) h.slice(i + 1).split("&").forEach(function (kv) { if (!kv) return; var p = kv.split("="); q[decodeURIComponent(p[0])] = decodeURIComponent((p[1] || "").replace(/\+/g, " ")); });
+    return { path: path, q: q };
+  }
+  function qs(q) { var s = Object.keys(q).filter(function (k) { return q[k]; }).map(function (k) { return encodeURIComponent(k) + "=" + encodeURIComponent(q[k]); }).join("&"); return s ? "?" + s : ""; }
+  function go(p) { location.hash = p; }
+
+  var app = document.getElementById("app");
+  var ui = { loadingKey: null, loadedKey: null, size: null, sizeError: false, toast: null, couponMsg: null };
+  var toastTimer;
+
+  function bag() { return get("bag", []); }
+  function wishlist() { return get("wishlist", []); }
+
+  window.__lab = {
+    get bag() { return bag(); },
+    get wishlist() { return wishlist(); },
+    get coupon() { return get("coupon", null); },
+    get totals() { return totals(); },
+    reset: function () { Object.keys(sessionStorage).forEach(function (k) { if (k.indexOf(NS) === 0) sessionStorage.removeItem(k); }); }
+  };
+
+  function toast(t) { ui.toast = t; clearTimeout(toastTimer); toastTimer = setTimeout(function () { ui.toast = null; render(); }, 2500); }
+
+  function header(q) {
+    var b = bag().reduce(function (s, x) { return s + x.qty; }, 0), w = wishlist().length;
+    return '<header><div class="logo" data-go="/" role="link" aria-label="TrendKart home">TrendKart</div>' +
+      '<form id="search-form" role="search"><input id="search" name="q" type="search" placeholder="Search for products, brands and more" aria-label="Search" data-testid="search-input" value="' + esc(q || "") + '"></form>' +
+      '<div class="icons"><button data-go="/wishlist" aria-label="Wishlist" data-testid="wishlist-link">♡ Wishlist' + (w ? '<span class="count" data-testid="wishlist-count">' + w + '</span>' : '') + '</button>' +
+      '<button data-go="/bag" aria-label="Bag" data-testid="bag-link">👜 Bag' + (b ? '<span class="count" data-testid="bag-count">' + b + '</span>' : '') + '</button></div></header>' +
+      (ui.toast ? '<div class="toast" role="status" data-testid="toast">' + esc(ui.toast) + '</div>' : '');
+  }
+
+  function homeView() {
+    var cats = [["Men", "men", "🧔"], ["Women", "women", "👩"], ["Shirts", "shirt", "👔"], ["Shoes", "shoes", "👟"]];
+    return header() + '<main><h1 style="font-size:22px">Deal of the day: up to 50% off</h1><p>Shop the latest trends from top brands.</p>' +
+      '<div class="cats">' + cats.map(function (c) { return '<div class="cat" data-go="/products?q=' + c[1] + '" data-testid="category-' + c[1] + '"><div class="e">' + c[2] + '</div>' + c[0] + '</div>'; }).join("") + '</div></main>';
+  }
+
+  function matches(p, q) {
+    var words = (q.q || "").toLowerCase().split(/\s+/).filter(Boolean);
+    var hay = (p.brand + " " + p.name + " " + p.cat + " " + p.type).toLowerCase().replace(/t-shirt/g, "tshirt");
+    var ok = words.every(function (w) {
+      w = w.replace(/s$/, "").replace(/t-shirt/, "tshirt");
+      if (w === "men") return p.cat === "men";
+      if (w === "women") return p.cat === "women";
+      return hay.split(/[^a-z0-9]+/).some(function (h) { return h === w || h.indexOf(w) === 0; });
+    });
+    if (!ok) return false;
+    if (q.brand) { var bs = q.brand.split(","); if (bs.indexOf(p.brand) < 0) return false; }
+    if (q.price) { var band = PRICE_BANDS.filter(function (b) { return b[0] === q.price; })[0]; if (band && (p.price < band[2] || p.price > band[3])) return false; }
+    if (q.gender && p.cat !== q.gender) return false;
+    return true;
+  }
+
+  function listView(q) {
+    var key = JSON.stringify(q);
+    if (ui.loadedKey !== key) {
+      if (ui.loadingKey !== key) {
+        ui.loadingKey = key;
+        setTimeout(function () { ui.loadedKey = key; ui.loadingKey = null; if (JSON.stringify(parse().q) === key) render(); }, 900);
+      }
+      return header(q.q) + '<main><div class="spinner" role="progressbar" aria-label="Loading products" data-testid="loader">Loading products…</div></main>';
+    }
+    var all = P.filter(function (p) { return matches(p, { q: q.q }); });
+    var list = P.filter(function (p) { return matches(p, q); });
+    var sort = q.sort || "recommended";
+    if (sort === "price_asc") list.sort(function (a, b) { return a.price - b.price; });
+    if (sort === "price_desc") list.sort(function (a, b) { return b.price - a.price; });
+    if (sort === "rating") list.sort(function (a, b) { return b.rating - a.rating; });
+    if (sort === "discount") list.sort(function (a, b) { return off(b) - off(a); });
+    var brands = all.map(function (p) { return p.brand; }).filter(function (b, i, a) { return a.indexOf(b) === i; }).sort();
+    var selBrands = (q.brand || "").split(",").filter(Boolean);
+    var filters = '<aside class="filters" aria-label="Filters"><h3>Gender</h3>' +
+      [["", "All"], ["men", "Men"], ["women", "Women"]].map(function (g) { return '<label><input type="radio" name="gender" value="' + g[0] + '"' + ((q.gender || "") === g[0] ? " checked" : "") + '> ' + g[1] + '</label>'; }).join("") +
+      '<h3>Brand</h3>' + brands.map(function (b) { var n = all.filter(function (p) { return p.brand === b; }).length; return '<label><input type="checkbox" name="brand" value="' + esc(b) + '"' + (selBrands.indexOf(b) >= 0 ? " checked" : "") + '> ' + esc(b) + ' <span style="color:#94969f">(' + n + ')</span></label>'; }).join("") +
+      '<h3>Price</h3>' + [["", "Any price"]].concat(PRICE_BANDS).map(function (b) { return '<label><input type="radio" name="price" value="' + b[0] + '"' + ((q.price || "") === b[0] ? " checked" : "") + '> ' + b[1] + '</label>'; }).join("") +
+      '<div style="margin-top:12px"><button class="ghost" data-action="clear-filters">Clear all</button></div></aside>';
+    var cards = list.map(function (p) {
+      return '<li class="product-base" data-testid="product-card" data-go="/p/' + p.id + '"><div class="img" aria-hidden="true">' + p.icon + '</div><div class="info">' +
+        '<h3 class="product-brand" style="margin:0">' + esc(p.brand) + '</h3><h4 class="product-product" style="margin:2px 0 0;font-weight:400">' + esc(p.name) + '</h4>' +
+        '<div class="rating">' + p.rating.toFixed(1) + ' ★</div>' +
+        '<div class="product-price"><span class="product-discountedPrice" data-testid="product-price">' + inr(p.price) + '</span><span class="product-strike">' + inr(p.mrp) + '</span><span class="product-discountPercentage">(' + off(p) + '% OFF)</span></div></div></li>';
+    }).join("");
+    return header(q.q) + '<main><div class="layout">' + filters + '<section class="results"><div class="bar"><h1><span data-testid="results-title">' + esc(q.q || "All products") + '</span> <span class="title-count" data-testid="results-count" style="color:#7e818c;font-weight:400">- ' + list.length + ' items</span></h1>' +
+      '<label>Sort by: <select id="sort" aria-label="Sort by" data-testid="sort-select">' +
+      [["recommended", "Recommended"], ["price_asc", "Price: Low to High"], ["price_desc", "Price: High to Low"], ["rating", "Customer Rating"], ["discount", "Better Discount"]].map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === sort ? " selected" : "") + '>' + o[1] + '</option>'; }).join("") +
+      '</select></label></div>' + (list.length ? '<ul class="grid" style="list-style:none;padding:0;margin:0" data-testid="results">' + cards + '</ul>' : '<div class="empty" data-testid="no-results">We couldn\'t find any matches!</div>') + '</section></div></main>';
+  }
+
+  function pdpView(id) {
+    var p = byId(id);
+    if (!p) return header() + '<main><div class="empty">Product not found</div></main>';
+    var inWish = wishlist().indexOf(p.id) >= 0;
+    return header() + '<main><div class="pdp"><div class="img" aria-hidden="true">' + p.icon + '</div><div class="details">' +
+      '<h1 class="pdp-title" data-testid="pdp-brand" style="margin:0">' + esc(p.brand) + '</h1><h2 class="pdp-name" data-testid="pdp-name" style="font-weight:400;color:#535766;margin:4px 0 12px">' + esc(p.name) + '</h2>' +
+      '<div class="rating">' + p.rating.toFixed(1) + ' ★ Ratings</div>' +
+      '<p style="font-size:22px;margin:12px 0"><b data-testid="pdp-price">' + inr(p.price) + '</b> <span class="product-strike">MRP ' + inr(p.mrp) + '</span> <span class="product-discountPercentage">(' + off(p) + '% OFF)</span></p>' +
+      '<h3 style="font-size:14px;margin:16px 0 4px">SELECT SIZE</h3><div class="sizes" role="group" aria-label="Select size">' +
+      SIZES.map(function (s) { var oos = p.oos.indexOf(s) >= 0; return '<button class="size-buttons-size-button' + (ui.size === s ? " selected" : "") + '" data-size="' + s + '" aria-pressed="' + (ui.size === s) + '"' + (oos ? ' disabled title="Out of stock"' : '') + '>' + s + '</button>'; }).join("") + '</div>' +
+      (ui.sizeError ? '<p class="size-error" role="alert" data-testid="size-error">Please select a size</p>' : '') +
+      '<div style="display:flex;gap:10px;margin-top:14px"><button data-action="add-to-bag" data-testid="add-to-bag">ADD TO BAG</button>' +
+      '<button class="ghost" data-action="wishlist" data-testid="wishlist-button">' + (inWish ? "♥ WISHLISTED" : "♡ WISHLIST") + '</button></div></div></div></main>';
+  }
+
+  function totals() {
+    var items = bag();
+    var mrp = 0, price = 0;
+    items.forEach(function (it) { var p = byId(it.id); mrp += p.mrp * it.qty; price += p.price * it.qty; });
+    var c = get("coupon", null), couponOff = 0;
+    if (c && COUPONS[c]) { var cp = COUPONS[c]; couponOff = cp.pct ? Math.round(price * cp.pct / 100) : cp.flat; }
+    var delivery = items.length && price - couponOff < 999 ? 99 : 0;
+    return { mrp: mrp, discount: mrp - price, coupon: couponOff, delivery: delivery, total: price - couponOff + delivery, count: items.reduce(function (s, x) { return s + x.qty; }, 0) };
+  }
+
+  function bagView() {
+    var items = bag();
+    if (!items.length) return header() + '<main><div class="empty" data-testid="empty-bag"><div style="font-size:48px">👜</div><h2>Hey, it feels so light!</h2><p>There is nothing in your bag. Let\'s add some items.</p><button data-go="/products?q=shirt">Shop shirts</button></div></main>';
+    var t = totals();
+    var rows = items.map(function (it, i) {
+      var p = byId(it.id);
+      return '<div class="bag-item" data-testid="bag-item"><div class="img" aria-hidden="true">' + p.icon + '</div><div style="flex:1"><b data-testid="bag-item-brand">' + esc(p.brand) + '</b><div style="font-size:13px;color:#535766" data-testid="bag-item-name">' + esc(p.name) + '</div>' +
+        '<div style="display:flex;gap:10px;margin-top:6px;font-size:13px"><span data-testid="bag-item-size">Size: ' + it.size + '</span>' +
+        '<label>Qty: <select data-qty="' + i + '" aria-label="Quantity for ' + esc(p.name) + '">' + [1, 2, 3, 4, 5].map(function (n) { return '<option' + (n === it.qty ? " selected" : "") + '>' + n + '</option>'; }).join("") + '</select></label></div>' +
+        '<div style="margin-top:6px"><b data-testid="bag-item-price">' + inr(p.price * it.qty) + '</b></div></div>' +
+        '<button class="ghost" data-remove="' + i + '" aria-label="Remove ' + esc(p.name) + '">Remove</button></div>';
+    }).join("");
+    var c = get("coupon", null);
+    return header() + '<main><div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start"><section style="flex:1;min-width:280px"><h1 style="font-size:18px">My Bag <span data-testid="bag-title-count">(' + t.count + ' item' + (t.count === 1 ? '' : 's') + ')</span></h1>' + rows + '</section>' +
+      '<aside class="price-details" aria-label="Price details"><h2 style="font-size:13px;text-transform:uppercase;margin:0 0 10px">Coupons</h2>' +
+      '<form class="coupon" id="coupon-form"><input id="coupon" placeholder="Enter coupon code" aria-label="Coupon code" value="' + esc(c || "") + '"><button type="submit" class="ghost">Apply</button></form>' +
+      (ui.couponMsg ? '<p class="' + (ui.couponMsg.ok ? "msg-ok" : "msg-err") + '" role="status" data-testid="coupon-message">' + esc(ui.couponMsg.text) + '</p>' : '') +
+      '<h2 style="font-size:13px;text-transform:uppercase;margin:16px 0 6px">Price details (' + t.count + ' item' + (t.count === 1 ? '' : 's') + ')</h2>' +
+      '<div class="price-row"><span>Total MRP</span><span data-testid="total-mrp">' + inr(t.mrp) + '</span></div>' +
+      '<div class="price-row"><span>Discount on MRP</span><span data-testid="mrp-discount" style="color:#03a685">-' + inr(t.discount) + '</span></div>' +
+      '<div class="price-row"><span>Coupon Discount</span><span data-testid="coupon-discount" style="color:#03a685">' + (t.coupon ? "-" + inr(t.coupon) : "Apply Coupon") + '</span></div>' +
+      '<div class="price-row"><span>Delivery Fee</span><span data-testid="delivery-fee">' + (t.delivery ? inr(t.delivery) : "FREE") + '</span></div>' +
+      '<div class="price-row price-total"><span>Total Amount</span><span data-testid="total-amount">' + inr(t.total) + '</span></div>' +
+      '<button style="width:100%;margin-top:10px" data-action="place-order" data-testid="place-order">PLACE ORDER</button></aside></div></main>';
+  }
+
+  function wishlistView() {
+    var w = wishlist();
+    return header() + '<main><h1 style="font-size:18px">My Wishlist <span data-testid="wishlist-title-count">' + w.length + ' item' + (w.length === 1 ? '' : 's') + '</span></h1>' +
+      (w.length ? '<ul class="grid" style="list-style:none;padding:0">' + w.map(function (id) { var p = byId(id); return '<li class="product-base" data-testid="wishlist-item" data-go="/p/' + p.id + '"><div class="img">' + p.icon + '</div><div class="info"><div class="product-brand">' + esc(p.brand) + '</div><div class="product-product">' + esc(p.name) + '</div><div class="product-discountedPrice">' + inr(p.price) + '</div></div></li>'; }).join("") + '</ul>' : '<div class="empty">Your wishlist is empty.</div>') + '</main>';
+  }
+
+  function orderView() {
+    var o = get("lastOrder", null);
+    return header() + '<main><div class="empty"><div style="font-size:48px">🎉</div><h1 data-testid="order-confirmed">Order confirmed</h1>' + (o ? '<p>Order <b data-testid="order-id">' + o.id + '</b> · Total paid <b data-testid="order-total">' + inr(o.total) + '</b></p>' : '') + '<button data-go="/">Continue shopping</button></div></main>';
+  }
+
+  var lastPath = null;
+  function render() {
+    var r = parse();
+    if (r.path !== lastPath) { ui.size = null; ui.sizeError = false; if (r.path !== "/bag") ui.couponMsg = null; lastPath = r.path; }
+    var html;
+    if (r.path === "/") html = homeView();
+    else if (r.path === "/products") html = listView(r.q);
+    else if (r.path.indexOf("/p/") === 0) html = pdpView(r.path.slice(3));
+    else if (r.path === "/bag") html = bagView();
+    else if (r.path === "/wishlist") html = wishlistView();
+    else if (r.path === "/order-confirmed") html = orderView();
+    else html = header() + '<main><div class="empty">Page not found</div></main>';
+    app.innerHTML = html;
+    var p = r.path.indexOf("/p/") === 0 ? byId(r.path.slice(3)) : null;
+    document.title = p ? p.brand + " " + p.name + " | TrendKart" : r.path === "/bag" ? "Shopping Bag | TrendKart" : r.path === "/products" ? (r.q.q || "Products") + " | TrendKart" : "TrendKart | Fashion Store";
+  }
+
+  function updateQuery(patch) {
+    var r = parse(), q = {};
+    Object.keys(r.q).forEach(function (k) { q[k] = r.q[k]; });
+    Object.keys(patch).forEach(function (k) { q[k] = patch[k]; });
+    go("/products" + qs(q));
+  }
+
+  app.addEventListener("click", function (e) {
+    var t = e.target.closest("[data-go],[data-action],[data-size],[data-remove]");
+    if (!t || t.disabled) return;
+    if (t.dataset.go) { if (location.hash.replace(/^#/, "") === t.dataset.go) return render(); return go(t.dataset.go); }
+    var id = +parse().path.slice(3);
+    if (t.dataset.size) { ui.size = t.dataset.size; ui.sizeError = false; return render(); }
+    if (t.dataset.action === "add-to-bag") {
+      if (!ui.size) { ui.sizeError = true; return render(); }
+      var b = bag(), ex = b.filter(function (x) { return x.id === id && x.size === ui.size; })[0];
+      if (ex) ex.qty += 1; else b.push({ id: id, size: ui.size, qty: 1 });
+      set("bag", b); toast("Added to bag"); return render();
+    }
+    if (t.dataset.action === "wishlist") {
+      var w = wishlist(), i = w.indexOf(id);
+      if (i >= 0) w.splice(i, 1); else w.push(id);
+      set("wishlist", w); toast(i >= 0 ? "Removed from wishlist" : "Added to wishlist"); return render();
+    }
+    if (t.dataset.remove != null) { var bb = bag(); bb.splice(+t.dataset.remove, 1); set("bag", bb); if (!bb.length) set("coupon", null); return render(); }
+    if (t.dataset.action === "clear-filters") { var q0 = parse().q; return go("/products" + qs({ q: q0.q, sort: q0.sort })); }
+    if (t.dataset.action === "place-order") {
+      var tt = totals();
+      set("lastOrder", { id: "TK" + String(Date.now()).slice(-6), total: tt.total, items: bag() });
+      set("bag", []); set("coupon", null);
+      return go("/order-confirmed");
+    }
+  });
+
+  app.addEventListener("change", function (e) {
+    var el = e.target;
+    if (el.id === "sort") return updateQuery({ sort: el.value === "recommended" ? "" : el.value });
+    if (el.name === "brand") {
+      var sel = Array.prototype.slice.call(app.querySelectorAll("input[name=brand]:checked")).map(function (x) { return x.value; });
+      return updateQuery({ brand: sel.join(",") });
+    }
+    if (el.name === "price") return updateQuery({ price: el.value });
+    if (el.name === "gender") return updateQuery({ gender: el.value });
+    if (el.dataset.qty != null) { var b = bag(); b[+el.dataset.qty].qty = +el.value; set("bag", b); return render(); }
+  });
+
+  app.addEventListener("submit", function (e) {
+    e.preventDefault();
+    if (e.target.id === "search-form") {
+      var v = document.getElementById("search").value.trim();
+      if (v) go("/products" + qs({ q: v }));
+    }
+    if (e.target.id === "coupon-form") {
+      var code = document.getElementById("coupon").value.trim().toUpperCase();
+      var t = totals(), price = t.mrp - t.discount;
+      if (!COUPONS[code]) { set("coupon", null); ui.couponMsg = { ok: false, text: "Invalid coupon code" }; }
+      else if (price < COUPONS[code].min) { set("coupon", null); ui.couponMsg = { ok: false, text: "Add items worth " + inr(COUPONS[code].min - price) + " more to use " + code }; }
+      else { set("coupon", code); ui.couponMsg = { ok: true, text: "Coupon " + code + " applied" }; }
+      render();
+    }
+  });
+
+  window.addEventListener("hashchange", render);
+  render();
+})();
+</script>
+</body>
+</html>
