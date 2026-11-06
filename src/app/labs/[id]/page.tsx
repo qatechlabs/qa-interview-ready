@@ -52,7 +52,9 @@ export default async function LabPage({ params }: { params: { id: string } }) {
             ))}
           </div>
           <h1 className="text-2xl font-bold sm:text-3xl">{s.title}</h1>
-          <p className="mt-1 text-sm muted">App: {app.name}, a practice {app.styledAfter}. Login: {app.credentials}.</p>
+          <p className="mt-1 text-sm muted">
+            {app.remote ? `Site: ${app.base}, ${app.styledAfter}. Runs on GitHub Actions in your repo.` : `App: ${app.name}, a practice ${app.styledAfter}.`} Login: {app.credentials}.
+          </p>
         </div>
         {next && (
           <Link href={`/labs/${next.id}`} className="btn btn-ghost">Next scenario →</Link>

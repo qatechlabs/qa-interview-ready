@@ -53,7 +53,7 @@ export default function Home() {
           ["⏱", "60-second answers", "A crisp spoken answer first, with a timer to rehearse, then the deep explanation and example.", null, null],
           ["💻", "Real code", "Java for Selenium and REST Assured, TypeScript for Playwright, Python, SQL, YAML and more.", null, null],
           ["🎤", "Mock interviews", "Timed rounds that score you, track weak topics and build your revision list automatically.", "/mock", "Try a round →"],
-          ["🧪", "Live coding labs", "Interview scenarios on a shop, an HR portal and a fashion store. Write the test, run it, watch it click through live.", "/labs", "Try a free lab →"],
+          ["🧪", "Live coding labs", "Interview scenarios on a shop, an HR portal and a fashion store, plus real-site framework labs on saucedemo.com, OrangeHRM and AutomationExercise that run on GitHub Actions from a repo in your name.", "/labs", "Try a free lab →"],
         ].map(([icon, title, text, href, cta]) => (
           <div key={title} className="card p-5">
             <div className="text-2xl">{icon}</div>

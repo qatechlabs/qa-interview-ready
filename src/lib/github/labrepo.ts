@@ -36,7 +36,7 @@ export function validateFiles(input: unknown): Record<string, string> {
   return out;
 }
 
-interface Repo {
+export interface Repo {
   name: string;
   full_name: string;
   html_url: string;
@@ -214,7 +214,7 @@ export async function commitLab(u: GitHubUser, siteUrl: string, scenarioId: stri
   return withToken((token) => commitTree(token, cfg.org, repo, u, files, `labs/${scenarioId}/`, message));
 }
 
-async function commitTree(token: string, org: string, repo: Repo, u: GitHubUser, files: Record<string, string>, prefix: string, message: string): Promise<CommitResult> {
+export async function commitTree(token: string, org: string, repo: Repo, u: GitHubUser, files: Record<string, string>, prefix: string, message: string): Promise<CommitResult> {
   const base = `/repos/${org}/${repo.name}`;
   const branch = repo.default_branch || "main";
   const ref = await gh<{ object: { sha: string } }>(`${base}/git/ref/heads/${branch}`, token);
