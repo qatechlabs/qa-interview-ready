@@ -24,8 +24,14 @@ export async function GET() {
     return NextResponse.json(out);
   }
   try {
-    const app = await gh<{ slug: string; name: string; html_url: string }>("/app", appJwt());
+    const app = await gh<{ slug: string; name: string; html_url: string; client_id?: string }>("/app", appJwt());
     out.app = { slug: app.slug, name: app.name, url: app.html_url };
+    // The client ID is public (it appears in the sign-in URL), so comparing it here is safe.
+    if (app.client_id) {
+      out.appClientId = app.client_id;
+      out.clientIdMatchesApp = app.client_id === cfg.clientId;
+      if (!out.clientIdMatchesApp) out.hint = `GITHUB_APP_CLIENT_ID in Vercel is "${cfg.clientId}" but the App's Client ID is "${app.client_id}". Update the variable and redeploy.`;
+    }
     const installs = await gh<{ account: { login: string } }[]>("/app/installations?per_page=100", appJwt());
     out.installedOn = installs.map((i) => i.account.login);
     out.installedOnLabOrg = installs.some((i) => i.account.login.toLowerCase() === cfg.org.toLowerCase());
