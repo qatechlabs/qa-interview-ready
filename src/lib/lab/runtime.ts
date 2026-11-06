@@ -979,6 +979,12 @@ export function createRuntime(opts: RunOptions) {
     if (ka.length !== kb.length) return false;
     return ka.every((k) => deepEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]));
   }
+  /** Subset match: every key of `expected` deep-equals the same key of `actual` (nested objects recurse). */
+  function matchesObject(actual: unknown, expected: unknown): boolean {
+    if (expected === null || typeof expected !== "object" || Array.isArray(expected)) return deepEqual(actual, expected);
+    if (actual === null || typeof actual !== "object") return false;
+    return Object.entries(expected as Record<string, unknown>).every(([k, v]) => matchesObject((actual as Record<string, unknown>)[k], v));
+  }
   const fmt = (v: unknown) => {
     try {
       return typeof v === "string" ? JSON.stringify(v) : v instanceof RegExp ? v.toString() : JSON.stringify(v);
@@ -1132,6 +1138,7 @@ export function createRuntime(opts: RunOptions) {
         toMatch: (e: RegExp | string) => sync("toMatch", fmt(e), typeof actual === "string" && (e instanceof RegExp ? e.test(actual) : actual.includes(e))),
         toBeInstanceOf: (c: new (...x: unknown[]) => unknown) => sync("toBeInstanceOf", c?.name, actual instanceof c),
         toHaveProperty: (k: string) => sync("toHaveProperty", fmt(k), actual != null && k in (actual as object)),
+        toMatchObject: (e: Record<string, unknown>) => sync("toMatchObject", fmt(e), matchesObject(actual, e)),
       } as Record<string, (...args: never[]) => void>;
     };
     const positive = build(false) as Record<string, unknown>;

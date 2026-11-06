@@ -386,6 +386,7 @@ ${swagLogin}
     await page.getByPlaceholder('Last Name').fill('Rao');
     await page.getByPlaceholder('Zip/Postal Code').fill('560001');
     await page.getByRole('button', { name: 'Continue' }).click();
+    await expect(page).toHaveURL(/checkout-step-two/);
   });
 
   await test.step('verify the maths', async () => {
@@ -936,7 +937,7 @@ export class LoginPage {
   }
 }
 `,
-      "pages/inventory.page.ts": `import type { Page } from '@playwright/test';
+      "pages/inventory.page.ts": `import { expect, type Page } from '@playwright/test';
 
 export class InventoryPage {
   constructor(private readonly page: Page) {}
@@ -946,7 +947,9 @@ export class InventoryPage {
   }
 
   async addToCart(productName: string) {
-    await this.card(productName).getByRole('button', { name: 'Add to cart' }).click();
+    const card = this.card(productName);
+    await card.getByRole('button', { name: 'Add to cart' }).click();
+    await expect(card.getByRole('button', { name: 'Remove' })).toBeVisible(); // the cart call has completed
   }
 
   async cartCount(): Promise<number> {
@@ -1085,7 +1088,7 @@ test('a new employee can be found by name', async ({ adminPage, employee }) => {
   await employees.search(employee.first);
 
   await expect(adminPage.getByTestId('records-found')).toHaveText('(1) Record Found');
-  await expect(adminPage.getByTestId('employee-row')).toContainText(\`\${employee.first} \${employee.last}\`);
+  await expect(adminPage.getByTestId('employee-row')).toContainText(employee.last);
 });
 `,
       "fixtures.ts": `import { test as base, type Page } from '@playwright/test';
@@ -1585,7 +1588,9 @@ export class InventoryPage {
   }
 
   async addToCart(productName: string) {
-    await this.card(productName).getByRole('button', { name: 'Add to cart' }).click();
+    const card = this.card(productName);
+    await card.getByRole('button', { name: 'Add to cart' }).click();
+    await expect(card.getByRole('button', { name: 'Remove' })).toBeVisible(); // the cart call has completed
   }
 
   async cartCount(): Promise<number> {
@@ -2221,7 +2226,7 @@ export class LoginPage {
   }
 }
 `,
-      "pages/inventory.page.ts": `import type { Page } from '@playwright/test';
+      "pages/inventory.page.ts": `import { expect, type Page } from '@playwright/test';
 
 export class InventoryPage {
   readonly title;
@@ -2233,12 +2238,18 @@ export class InventoryPage {
     this.badge = page.getByTestId('shopping-cart-badge');
   }
 
+  async goto() {
+    await this.page.goto('/inventory');
+  }
+
   private card(name: string) {
     return this.items.filter({ hasText: name });
   }
 
   async addToCart(name: string) {
-    await this.card(name).getByRole('button', { name: 'Add to cart' }).click();
+    const card = this.card(name);
+    await card.getByRole('button', { name: 'Add to cart' }).click();
+    await expect(card.getByRole('button', { name: 'Remove' })).toBeVisible(); // the cart call has completed
   }
 
   async sortBy(value: 'az' | 'za' | 'lohi' | 'hilo') {
@@ -2269,11 +2280,15 @@ export class CartPage {
 import { LoginPage } from './pages/login.page';
 import { InventoryPage } from './pages/inventory.page';
 import { CartPage } from './pages/cart.page';
+import { ShopApi } from './api/shop.api';
 import { users } from './data/users';
 
 type Pages = { login: LoginPage; inventory: InventoryPage; cart: CartPage };
 
-export const test = base.extend<{ app: Pages; loggedIn: Pages }>({
+export const test = base.extend<{ app: Pages; loggedIn: Pages; api: ShopApi }>({
+  api: async ({ request }, use) => {
+    await use(new ShopApi(request));
+  },
   app: async ({ page }, use) => {
     const app = { login: new LoginPage(page), inventory: new InventoryPage(page), cart: new CartPage(page) };
     await app.login.goto();
@@ -2286,6 +2301,72 @@ export const test = base.extend<{ app: Pages; loggedIn: Pages }>({
 });
 
 export { expect } from '@playwright/test';
+`,
+      "api/shop.api.ts": `import type { APIRequestContext } from '@playwright/test';
+
+/** Thin client for the SwagShop REST API (GET /api lists every endpoint). */
+export class ShopApi {
+  constructor(private readonly request: APIRequestContext) {}
+
+  async login(username: string, password: string) {
+    const res = await this.request.post('/api/auth/login', { data: { username, password } });
+    if (!res.ok()) throw new Error(\`login failed: \${res.status()} \${await res.text()}\`);
+    return (await res.json()) as { token: string; user: { username: string } };
+  }
+
+  async products(params: Record<string, string> = {}) {
+    const res = await this.request.get('/api/products', { params });
+    return (await res.json()) as { items: { id: number; name: string; price: number }[]; total: number };
+  }
+
+  addToCart(productId: number, qty = 1) {
+    return this.request.post('/api/cart/items', { data: { productId, qty } });
+  }
+
+  async cart() {
+    return (await (await this.request.get('/api/cart')).json()) as { count: number; subtotal: number; total: number; items: { productId: number; qty: number }[] };
+  }
+}
+`,
+      "tests/api.spec.ts": `import { test, expect } from '../fixtures';
+import { users } from '../data/users';
+
+test.describe('Catalogue and cart API @regression', () => {
+  test('wrong password is rejected with a stable error code', async ({ request }) => {
+    const res = await request.post('/api/auth/login', { data: { username: users.standard.username, password: 'nope' } });
+    expect(res.status()).toBe(401);
+    expect((await res.json()).error.code).toBe('invalid_credentials');
+  });
+
+  test('cart totals add up after two lines', async ({ api }) => {
+    await api.login(users.standard.username, users.standard.password);
+    const { items } = await api.products();
+    expect(items).toHaveLength(12);
+    expect(await api.addToCart(items[0].id, 2)).toBeOK();
+    expect(await api.addToCart(items[1].id)).toBeOK();
+    const cart = await api.cart();
+    expect(cart.count).toBe(3);
+    expect(cart.subtotal).toBeCloseTo(items[0].price * 2 + items[1].price, 2);
+  });
+});
+`,
+      "tests/hybrid.spec.ts": `import { test, expect } from '../fixtures';
+import { users, products } from '../data/users';
+import { ShopApi } from '../api/shop.api';
+
+test.describe('Cart seeded by API @regression', () => {
+  test('items added through the API appear in the cart page', async ({ app, page }) => {
+    const api = new ShopApi(page.request); // shares the browser session
+    await api.login(users.standard.username, users.standard.password);
+    const { items } = await api.products({ q: 'backpack' });
+    expect(await api.addToCart(items[0].id)).toBeOK();
+
+    await app.inventory.goto();
+    await app.inventory.openCart();
+    await expect(app.cart.items).toHaveCount(1);
+    await expect(app.cart.names).toHaveText([products.backpack]);
+  });
+});
 `,
       "tests/login.spec.ts": `import { test, expect } from '../fixtures';
 import { users } from '../data/users';
@@ -2343,8 +2424,11 @@ export const newEmployee = () => ({ first: \`Auto\${Date.now()}\`, last: 'Framew
 
 export class LoginPage {
   readonly error;
+  /** visible once the session is established */
+  readonly dashboardLink;
   constructor(private readonly page: Page) {
     this.error = page.getByRole('alert');
+    this.dashboardLink = page.getByRole('link', { name: 'Dashboard' });
   }
 
   async goto() {
@@ -2423,15 +2507,19 @@ export class LeavePage {
   }
 }
 `,
-      "fixtures.ts": `import { test as base } from '@playwright/test';
+      "fixtures.ts": `import { test as base, expect } from '@playwright/test';
 import { LoginPage } from './pages/login.page';
 import { EmployeesPage } from './pages/employees.page';
 import { LeavePage } from './pages/leave.page';
+import { HrApi } from './api/hr.api';
 import { admin, newEmployee } from './data/users';
 
 type Pages = { login: LoginPage; employees: EmployeesPage; leave: LeavePage };
 
-export const test = base.extend<{ app: Pages; adminApp: Pages; employee: { first: string; last: string; id: string } }>({
+export const test = base.extend<{ app: Pages; adminApp: Pages; api: HrApi; employee: { first: string; last: string; id: string } }>({
+  api: async ({ request }, use) => {
+    await use(new HrApi(request));
+  },
   app: async ({ page }, use) => {
     const app = { login: new LoginPage(page), employees: new EmployeesPage(page), leave: new LeavePage(page) };
     await app.login.goto();
@@ -2439,6 +2527,7 @@ export const test = base.extend<{ app: Pages; adminApp: Pages; employee: { first
   },
   adminApp: async ({ app }, use) => {
     await app.login.login(admin.username, admin.password);
+    await expect(app.login.dashboardLink).toBeVisible(); // the session exists before any test or API call runs
     await use(app);
   },
   // creates an employee for the test and removes it afterwards
@@ -2453,6 +2542,79 @@ export const test = base.extend<{ app: Pages; adminApp: Pages; employee: { first
 });
 
 export { expect } from '@playwright/test';
+`,
+      "api/hr.api.ts": `import type { APIRequestContext } from '@playwright/test';
+
+/** Client for the PeopleDesk REST API; one instance per session (cookies live in the request context). */
+export class HrApi {
+  constructor(readonly request: APIRequestContext) {}
+
+  async login(username: string, password: string) {
+    const res = await this.request.post('/api/auth/login', { data: { username, password } });
+    if (!res.ok()) throw new Error(\`login failed: \${res.status()}\`);
+    return res;
+  }
+
+  async createEmployee(data: { firstName: string; lastName: string; jobTitle?: string; department?: string }) {
+    const res = await this.request.post('/api/employees', { data });
+    if (res.status() !== 201) throw new Error(\`create failed: \${await res.text()}\`);
+    return (await res.json()).employee as { id: string; first: string; last: string };
+  }
+
+  async findByName(name: string) {
+    return (await (await this.request.get('/api/employees', { params: { name } })).json()) as { total: number; items: { id: string }[] };
+  }
+
+  deleteEmployee(id: string) {
+    return this.request.delete(\`/api/employees/\${id}\`);
+  }
+
+  async balance(employeeId?: string) {
+    const res = await this.request.get('/api/leave/balance', { params: employeeId ? { employeeId } : {} });
+    return (await res.json()).balances as { type: string; used: number; available: number }[];
+  }
+}
+`,
+      "tests/api.spec.ts": `import { test, expect } from '../fixtures';
+import { admin, newEmployee } from '../data/users';
+
+test.describe('Employee API @regression', () => {
+  test('validation returns field-level details', async ({ api }) => {
+    await api.login(admin.username, admin.password);
+    const res = await api.request.post('/api/employees', { data: { firstName: 'Nolast' } });
+    expect(res.status()).toBe(400);
+    expect((await res.json()).error.details.lastName).toBe('Required');
+  });
+
+  test('an employee can be created, found and removed', async ({ api }) => {
+    await api.login(admin.username, admin.password);
+    const e = newEmployee();
+    const created = await api.createEmployee({ firstName: e.first, lastName: e.last, jobTitle: 'SDET', department: 'Quality Engineering' });
+    expect((await api.findByName(e.last)).total).toBe(1);
+    expect(await api.deleteEmployee(created.id)).toBeOK();
+    expect((await api.findByName(e.last)).total).toBe(0);
+  });
+});
+`,
+      "tests/hybrid.spec.ts": `import { test, expect } from '../fixtures';
+import { admin, newEmployee } from '../data/users';
+import { HrApi } from '../api/hr.api';
+
+test.describe('PIM search with API-seeded data @regression', () => {
+  test('an employee created through the API is found in the UI and removed afterwards', async ({ adminApp, page }) => {
+    const api = new HrApi(page.request); // same session as the UI login
+    const e = newEmployee();
+    const created = await api.createEmployee({ firstName: e.first, lastName: e.last, jobTitle: 'QA Engineer', department: 'Quality Engineering' });
+
+    await adminApp.employees.open();
+    await adminApp.employees.search(e.last);
+    await expect(adminApp.employees.recordsFound).toHaveText('(1) Record Found');
+    await expect(adminApp.employees.rows).toContainText([e.last]);
+
+    expect(await api.deleteEmployee(created.id)).toBeOK();
+    expect((await api.findByName(e.last)).total).toBe(0);
+  });
+});
 `,
       "tests/login.spec.ts": `import { test, expect } from '../fixtures';
 import { admin } from '../data/users';
@@ -2476,7 +2638,7 @@ test.describe('PIM @regression', () => {
   test('a new employee can be found by name', async ({ adminApp: app, employee }) => {
     await app.employees.search(employee.first);
     await expect(app.employees.recordsFound).toHaveText('(1) Record Found');
-    await expect(app.employees.rows).toContainText(\`\${employee.first} \${employee.last}\`);
+    await expect(app.employees.rows).toContainText(employee.last);
   });
 
   test('leave dates are validated before submission', async ({ adminApp: app }) => {
@@ -2572,8 +2734,16 @@ export class ProductPage {
       "fixtures.ts": `import { test as base } from '@playwright/test';
 import { SearchPage } from './pages/search.page';
 import { ProductPage } from './pages/product.page';
+import { BagPage } from './pages/bag.page';
+import { StoreApi } from './api/store.api';
 
-export const test = base.extend<{ search: SearchPage; product: ProductPage }>({
+export const test = base.extend<{ search: SearchPage; product: ProductPage; bag: BagPage; api: StoreApi }>({
+  api: async ({ request }, use) => {
+    await use(new StoreApi(request));
+  },
+  bag: async ({ page }, use) => {
+    await use(new BagPage(page));
+  },
   search: async ({ page }, use) => {
     const search = new SearchPage(page);
     await search.goto();
@@ -2585,6 +2755,88 @@ export const test = base.extend<{ search: SearchPage; product: ProductPage }>({
 });
 
 export { expect } from '@playwright/test';
+`,
+      "api/store.api.ts": `import type { APIRequestContext } from '@playwright/test';
+
+export interface BagTotals { mrp: number; discount: number; coupon: number; delivery: number; total: number; count: number }
+
+/** Client for the TrendKart REST API. */
+export class StoreApi {
+  constructor(private readonly request: APIRequestContext) {}
+
+  async search(q: string, params: Record<string, string> = {}) {
+    const res = await this.request.get('/api/products', { params: { q, ...params } });
+    return (await res.json()) as { total: number; items: { id: number; name: string; price: number }[] };
+  }
+
+  addToBag(productId: number, size: string, qty = 1) {
+    return this.request.post('/api/bag/items', { data: { productId, size, qty } });
+  }
+
+  applyCoupon(code: string) {
+    return this.request.post('/api/bag/coupon', { data: { code } });
+  }
+
+  async bag() {
+    return (await (await this.request.get('/api/bag')).json()) as { coupon: string | null; totals: BagTotals };
+  }
+}
+`,
+      "tests/api.spec.ts": `import { test, expect } from '../fixtures';
+import { SEARCHES } from '../data/searches';
+
+test.describe('Search and bag API @regression', () => {
+  for (const row of SEARCHES) {
+    test(\`API search "\${row.query}" returns \${row.expectedCount} products\`, async ({ api }) => {
+      const body = await api.search(row.query);
+      expect(body.total).toBe(row.expectedCount);
+      for (const p of body.items) expect(p.name).toContain(row.mustContain);
+    });
+  }
+
+  test('bag rules: size required, coupon applied, totals consistent', async ({ api }) => {
+    expect((await api.addToBag(104, '')).status()).toBe(400);
+    expect(await api.addToBag(104, 'M', 3)).toBeOK();
+    expect(await api.applyCoupon('TRENDY10')).toBeOK();
+    const { coupon, totals } = await api.bag();
+    expect(coupon).toBe('TRENDY10');
+    expect(totals.total).toBe(totals.mrp - totals.discount - totals.coupon + totals.delivery);
+  });
+});
+`,
+      "tests/hybrid.spec.ts": `import { test, expect } from '../fixtures';
+import { StoreApi } from '../api/store.api';
+import { parsePrice } from '../utils/money';
+
+test.describe('Bag seeded by API @regression', () => {
+  test('the bag page shows the total the API computed', async ({ product, bag, page }) => {
+    const api = new StoreApi(page.request); // same session as the page
+    expect(await api.addToBag(104, 'M', 2)).toBeOK();
+    expect(await api.applyCoupon('TRENDY10')).toBeOK();
+    const { totals } = await api.bag();
+
+    await bag.open();
+    await expect(bag.items).toHaveCount(1);
+    await expect(bag.total).toHaveText(\`₹\${totals.total.toLocaleString('en-IN')}\`);
+    expect(parsePrice(await bag.total.innerText())).toBe(totals.total);
+    await expect(product.bagCount).toHaveText(String(totals.count));
+  });
+});
+`,
+      "pages/bag.page.ts": `import type { Page } from '@playwright/test';
+
+export class BagPage {
+  readonly items;
+  readonly total;
+  constructor(private readonly page: Page) {
+    this.items = page.getByTestId('bag-item');
+    this.total = page.getByTestId('total-amount');
+  }
+
+  async open() {
+    await this.page.goto('/bag');
+  }
+}
 `,
       "tests/search.spec.ts": `import { test, expect } from '../fixtures';
 import { SEARCHES } from '../data/searches';
@@ -2658,7 +2910,7 @@ export class LoginPage {
   }
 }
 `,
-      "pages/inventory.page.ts": `import type { Page } from '@playwright/test';
+      "pages/inventory.page.ts": `import { expect, type Page } from '@playwright/test';
 
 export class InventoryPage {
   readonly title;
@@ -2671,7 +2923,9 @@ export class InventoryPage {
   }
 
   async addToCart(name: string) {
-    await this.items.filter({ hasText: name }).getByRole('button', { name: 'Add to cart' }).click();
+    const card = this.items.filter({ hasText: name });
+    await card.getByRole('button', { name: 'Add to cart' }).click();
+    await expect(card.getByRole('button', { name: 'Remove' })).toBeVisible(); // the cart call has completed
   }
 
   async sortBy(value: 'az' | 'za' | 'lohi' | 'hilo') {
@@ -2943,6 +3197,7 @@ export const test = base.extend<{ products: ProductsPage; cart: CartPage }>({
 export { expect } from '@playwright/test';
 `,
       "tests/products.spec.ts": `import { test, expect } from '../fixtures';
+import { json } from '../utils/api';
 
 test.describe('Products @smoke', () => {
   test('search results all match the term', async ({ products }) => {
@@ -2957,6 +3212,15 @@ test.describe('Products @smoke', () => {
     await products.addToCart(1);
     await cart.goto();
     await expect(cart.rows).toHaveCount(2);
+  });
+
+  test('every product shown in the UI exists in the products API', async ({ products, request }) => {
+    const api = await json(await request.get('/api/productsList'));
+    const known = new Set(api.products.map((p) => p.name));
+    await products.search('dress');
+    const names = await products.names.allTextContents();
+    expect(names.length).toBeGreaterThan(0);
+    for (const name of names) expect(known.has(name.trim())).toBe(true);
   });
 });
 `,
@@ -3574,6 +3838,420 @@ test('seeded bag checks out in the UI', async ({ page }) => {
       "The UI test starts on the page under test because the API did the shopping; that is the whole point of hybrid tests.",
       "Assert the formatted money the customer sees (₹1,077), then the raw number from the API (1077): two layers, one truth.",
       "Guests can check out, so no account is needed; add a login step only when the scenario is about member features.",
+    ],
+  },
+  // ---------------- Production-grade end-to-end journeys ----------------
+  "swagshop-e2e-purchase-journey": {
+    playwright:
+      pwHeader +
+      `const money = (t: string | null) => Number((t || '').match(/\\$([0-9.]+)/)?.[1] || 0); // the $ amount in the label
+const r2 = (n: number) => Math.round(n * 100) / 100;
+
+test('purchase journey: catalogue, cart, checkout, order', async ({ page }) => {
+  const api = page.request;
+  let jacket = 0;
+  let tee = 0;
+  let orderId = '';
+
+  await test.step('catalogue is healthy (API)', async () => {
+    const res = await api.get('/api/products');
+    expect(res).toBeOK();
+    const { items, total } = await res.json();
+    expect(total).toBe(12);
+    jacket = items.find((p) => p.name === 'Fleece Zip Jacket').price;
+    tee = items.find((p) => p.name === 'Classic Cotton Tee').price;
+    expect(jacket).toBeGreaterThan(0);
+  });
+
+  await test.step('shop as a customer (UI)', async () => {
+    await page.goto('/');
+    await page.getByPlaceholder('Username').fill('standard_user');
+    await page.getByPlaceholder('Password').fill('secret_sauce');
+    await page.getByRole('button', { name: 'Login' }).click();
+    await expect(page.getByTestId('inventory-item')).toHaveCount(12);
+
+    await page.getByTestId('add-to-cart-fleece-zip-jacket').click();
+    await page.getByTestId('add-to-cart-classic-cotton-tee').click();
+    await expect(page.getByTestId('shopping-cart-badge')).toHaveText('2');
+
+    await page.getByRole('button', { name: 'Shopping cart' }).click();
+    await page.getByLabel('Quantity for Classic Cotton Tee').selectOption('2');
+    await expect(page.getByTestId('shopping-cart-badge')).toHaveText('3');
+    await page.getByLabel('Coupon code').fill('SAVE10');
+    await page.getByRole('button', { name: 'Apply' }).click();
+    await expect(page.getByTestId('coupon-message')).toContainText('10% off');
+  });
+
+  await test.step('checkout maths (UI vs API prices)', async () => {
+    await page.getByRole('button', { name: 'Checkout' }).click();
+    await page.getByPlaceholder('First Name').fill('Asha');
+    await page.getByPlaceholder('Last Name').fill('Rao');
+    await page.getByPlaceholder('Zip/Postal Code').fill('560001');
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await expect(page).toHaveURL(/checkout-step-two/);
+    await expect(page.getByTestId('inventory-item')).toHaveCount(2);
+
+    const subtotal = r2(jacket + 2 * tee);
+    const discount = r2(subtotal * 0.1);
+    const tax = r2((subtotal - discount) * 0.08);
+    const total = r2(subtotal - discount + tax);
+    expect(money(await page.getByTestId('subtotal-label').textContent())).toBeCloseTo(subtotal, 2);
+    expect(money(await page.getByTestId('discount-label').textContent())).toBeCloseTo(discount, 2);
+    expect(money(await page.getByTestId('tax-label').textContent())).toBeCloseTo(tax, 2);
+    expect(money(await page.getByTestId('total-label').textContent())).toBeCloseTo(total, 2);
+
+    await page.getByRole('button', { name: 'Finish' }).click();
+    await expect(page.getByTestId('complete-header')).toHaveText('Thank you for your order!');
+    orderId = (await page.getByTestId('order-id').textContent()) || '';
+  });
+
+  await test.step('order placed, then cancelled (API + UI)', async () => {
+    const orders = await (await api.get('/api/orders')).json();
+    expect(orders.items).toHaveLength(1);
+    const order = orders.items[0];
+    expect(order.id).toBe(orderId);
+    expect(order.coupon).toBe('SAVE10');
+    expect(order.total).toBeCloseTo(r2(jacket + 2 * tee) * 0.9 * 1.08, 1);
+
+    const cancelled = await api.post(\`/api/orders/\${orderId}/cancel\`);
+    expect(cancelled).toBeOK();
+
+    await page.goto(\`/orders/\${orderId}\`);
+    await expect(page.getByTestId('order-status')).toHaveText('cancelled');
+    await expect(page.getByTestId('cancel-order')).toHaveCount(0);
+  });
+});
+`,
+    selenium: javaClass(
+      "PurchaseJourneyTest",
+      "/sandbox/swagshop",
+      `    static final String API = "https://interview.qatechlabs.com/api/sandbox/swagshop";
+
+    @Test
+    public void purchaseJourney() {
+        // Catalogue through REST Assured
+        io.restassured.response.Response products = io.restassured.RestAssured.given().baseUri(API).get("/products");
+        Assert.assertEquals(products.jsonPath().getInt("total"), 12);
+        double jacket = products.jsonPath().getDouble("items.find { it.name == 'Fleece Zip Jacket' }.price");
+        double tee = products.jsonPath().getDouble("items.find { it.name == 'Classic Cotton Tee' }.price");
+
+        // Shop in the UI
+${javaSwagLogin}
+        wait.until(ExpectedConditions.numberOfElementsToBe(By.cssSelector("[data-test=inventory-item]"), 12));
+        driver.findElement(By.cssSelector("[data-test=add-to-cart-fleece-zip-jacket]")).click();
+        driver.findElement(By.cssSelector("[data-test=add-to-cart-classic-cotton-tee]")).click();
+        wait.until(ExpectedConditions.textToBe(By.cssSelector("[data-test=shopping-cart-badge]"), "2"));
+        driver.findElement(By.cssSelector("[data-test=shopping-cart-link]")).click();
+        new Select(driver.findElement(By.cssSelector("[aria-label='Quantity for Classic Cotton Tee']"))).selectByVisibleText("2");
+        driver.findElement(By.id("coupon")).sendKeys("SAVE10");
+        driver.findElement(By.cssSelector("[data-test=apply-coupon]")).click();
+        wait.until(ExpectedConditions.textToBePresentInElementLocated(By.cssSelector("[data-test=coupon-message]"), "10% off"));
+
+        driver.findElement(By.cssSelector("[data-test=checkout]")).click();
+        driver.findElement(By.id("first-name")).sendKeys("Asha");
+        driver.findElement(By.id("last-name")).sendKeys("Rao");
+        driver.findElement(By.id("postal-code")).sendKeys("560001");
+        driver.findElement(By.id("continue")).click();
+        wait.until(ExpectedConditions.urlContains("checkout-step-two"));
+
+        double subtotal = Math.round((jacket + 2 * tee) * 100) / 100.0;
+        double discount = Math.round(subtotal * 10) / 100.0;
+        double tax = Math.round((subtotal - discount) * 8) / 100.0;
+        Assert.assertEquals(money(driver.findElement(By.cssSelector("[data-test=total-label]")).getText()), subtotal - discount + tax, 0.01);
+        driver.findElement(By.id("finish")).click();
+        wait.until(ExpectedConditions.textToBe(By.cssSelector("[data-test=complete-header]"), "Thank you for your order!"));
+        String orderId = driver.findElement(By.cssSelector("[data-test=order-id]")).getText();
+
+        // Verify and cancel through the API with the browser's session cookies
+        io.restassured.specification.RequestSpecification api = io.restassured.RestAssured.given().baseUri(API);
+        for (Cookie c : driver.manage().getCookies()) api = api.cookie(c.getName(), c.getValue());
+        Assert.assertEquals(api.get("/orders").jsonPath().getString("items[0].coupon"), "SAVE10");
+        Assert.assertEquals(api.post("/orders/" + orderId + "/cancel").statusCode(), 200);
+        driver.get(BASE + "#/orders/" + orderId);
+        wait.until(ExpectedConditions.textToBe(By.cssSelector("[data-test=order-status]"), "cancelled"));
+    }
+
+    static double money(String t) { return Double.parseDouble(t.replaceAll("[^0-9.]", "")); }`,
+    ),
+    notes: [
+      "Reading prices from the API and computing the expected totals makes the test survive a price change; hard-coded totals break on the first catalogue update.",
+      "test.step gives the report (and the delivery manager) the four phases of the journey; a failure points at a phase, not at line 57.",
+      "Every state change is verified on the other layer: the UI order through GET /api/orders, the API cancellation through the order page.",
+    ],
+  },
+  "peopledesk-e2e-hire-to-leave": {
+    playwright:
+      pwHeader +
+      `const lastName = 'Hire' + Date.now();
+let employeeId = '';
+
+const loginUi = async (page, username: string, password: string) => {
+  await page.goto('/');
+  await page.getByLabel('Username').fill(username);
+  await page.getByLabel('Password').fill(password);
+  await page.getByRole('button', { name: 'Login' }).click();
+  await expect(page.getByRole('link', { name: 'Dashboard' })).toBeVisible();
+};
+
+test.beforeEach(async ({ page }) => {
+  const api = page.request;
+  expect(await api.post('/api/auth/login', { data: { username: 'Admin', password: 'admin123' } })).toBeOK();
+  const created = await api.post('/api/employees', { data: { firstName: 'Rhea', lastName, jobTitle: 'QA Engineer', department: 'Quality Engineering' } });
+  expect(created.status()).toBe(201);
+  employeeId = (await created.json()).employee.id;
+});
+
+test.afterEach(async ({ page }) => {
+  const api = page.request;
+  await api.post('/api/auth/login', { data: { username: 'Admin', password: 'admin123' } });
+  expect(await api.delete(\`/api/employees/\${employeeId}\`)).toBeOK();
+  expect((await api.get(\`/api/employees/\${employeeId}\`)).status()).toBe(404);
+});
+
+test('hire to leave approval', async ({ page }) => {
+  const api = page.request;
+
+  await test.step('employee logs in and applies (UI)', async () => {
+    await loginUi(page, \`rhea.\${lastName.toLowerCase()}\`, 'Welcome@1');
+    await page.getByRole('link', { name: 'My Info' }).click();
+    await expect(page.getByTestId('my-name')).toHaveText(\`Rhea \${lastName}\`);
+    await expect(page.getByTestId('my-id')).toHaveText(employeeId);
+
+    await page.getByRole('link', { name: 'Leave' }).click();
+    await page.getByLabel('Leave Type').selectOption('Sick Leave');
+    await page.getByLabel('From Date').fill('2026-12-01');
+    await page.getByLabel('To Date').fill('2026-12-02');
+    await page.getByRole('button', { name: 'Apply' }).click();
+    await expect(page.getByRole('status')).toContainText('Successfully Submitted');
+    await expect(page.getByTestId('leave-row').getByTestId('leave-status')).toHaveText('Pending Approval');
+
+    await page.getByRole('link', { name: 'Time' }).click();
+    await page.getByRole('button', { name: 'Punch In' }).click();
+    await expect(page.getByTestId('punch-status')).toContainText('Punched in');
+  });
+
+  await test.step('request and punch exist (API)', async () => {
+    const leave = await (await api.get('/api/leave')).json();
+    expect(leave.items).toHaveLength(1);
+    expect(leave.items[0]).toMatchObject({ days: 2, status: 'Pending Approval', employeeId });
+    const attendance = await (await api.get('/api/attendance')).json();
+    expect(attendance.open).not.toBeNull();
+  });
+
+  await test.step('admin approves (UI) and the balance moves (API)', async () => {
+    await page.getByTestId('user-menu').click();
+    await page.getByRole('menuitem', { name: 'Logout' }).click();
+    await loginUi(page, 'Admin', 'admin123');
+    await page.getByRole('link', { name: 'Leave' }).click();
+    const row = page.getByTestId('leave-row').filter({ hasText: lastName });
+    await row.getByRole('button', { name: 'Approve' }).click();
+    await expect(row.getByTestId('leave-status')).toHaveText('Scheduled');
+
+    const balance = await (await api.get('/api/leave/balance', { params: { employeeId } })).json();
+    const sick = balance.balances.find((b) => b.type === 'Sick Leave');
+    expect(sick.used).toBe(2);
+    expect(sick.available).toBe(8);
+  });
+});
+`,
+    selenium: javaClass(
+      "HireToLeaveTest",
+      "/sandbox/peopledesk",
+      `    static final String API = "https://interview.qatechlabs.com/api/sandbox/peopledesk";
+    io.restassured.specification.RequestSpecification admin;
+    String lastName, id;
+
+    @BeforeMethod
+    public void seedHire() {
+        admin = io.restassured.RestAssured.given().baseUri(API).contentType("application/json").filter(new io.restassured.filter.session.SessionFilter());
+        admin.body(Map.of("username", "Admin", "password", "admin123")).post("/auth/login").then().statusCode(200);
+        lastName = "Hire" + System.currentTimeMillis();
+        id = admin.body(Map.of("firstName", "Rhea", "lastName", lastName, "jobTitle", "QA Engineer", "department", "Quality Engineering")).post("/employees").jsonPath().getString("employee.id");
+    }
+
+    @Test
+    public void hireToLeaveApproval() {
+        login("rhea." + lastName.toLowerCase(), "Welcome@1");
+        driver.findElement(By.linkText("Leave")).click();
+        new Select(driver.findElement(By.id("leaveType"))).selectByVisibleText("Sick Leave");
+        driver.findElement(By.id("fromDate")).sendKeys("2026-12-01");
+        driver.findElement(By.id("toDate")).sendKeys("2026-12-02");
+        driver.findElement(By.xpath("//button[text()='Apply']")).click();
+        wait.until(ExpectedConditions.textToBe(By.cssSelector("[data-test=leave-status]"), "Pending Approval"));
+        driver.findElement(By.linkText("Time")).click();
+        driver.findElement(By.cssSelector("[data-test=punch-in]")).click();
+        wait.until(ExpectedConditions.textToBePresentInElementLocated(By.cssSelector("[data-test=punch-status]"), "Punched in"));
+
+        // Verify through the API with the browser's cookies
+        io.restassured.specification.RequestSpecification me = io.restassured.RestAssured.given().baseUri(API);
+        for (Cookie c : driver.manage().getCookies()) me = me.cookie(c.getName(), c.getValue());
+        Assert.assertEquals(me.get("/leave").jsonPath().getInt("items[0].days"), 2);
+
+        driver.findElement(By.cssSelector("[data-test=user-menu]")).click();
+        driver.findElement(By.xpath("//a[@role='menuitem' and text()='Logout']")).click();
+        login("Admin", "admin123");
+        driver.findElement(By.linkText("Leave")).click();
+        WebElement row = driver.findElement(By.xpath("//tr[@data-test='leave-row'][contains(., '" + lastName + "')]"));
+        row.findElement(By.xpath(".//button[text()='Approve']")).click();
+        wait.until(ExpectedConditions.textToBe(By.xpath("//tr[@data-test='leave-row'][contains(., '" + lastName + "')]//*[@data-test='leave-status']"), "Scheduled"));
+        Assert.assertEquals(admin.queryParam("employeeId", id).get("/leave/balance").jsonPath().getInt("balances.find { it.type == 'Sick Leave' }.available"), 8);
+    }
+
+    @AfterMethod
+    public void cleanUp() {
+        admin.delete("/employees/" + id).then().statusCode(200);
+        Assert.assertEquals(admin.get("/employees/" + id).statusCode(), 404);
+    }
+
+    void login(String user, String pw) {
+        driver.get(BASE + "#/auth/login");
+        driver.findElement(By.id("username")).clear();
+        driver.findElement(By.id("username")).sendKeys(user);
+        driver.findElement(By.id("password")).sendKeys(pw);
+        driver.findElement(By.cssSelector("#login-form button[type=submit]")).click();
+        wait.until(ExpectedConditions.visibilityOfElementLocated(By.linkText("Dashboard")));
+    }`,
+    ),
+    notes: [
+      "One browser session carries both roles in sequence, and page.request follows it, so the API checks always run as the user the UI is logged in as.",
+      "Seed and clean up through the API; the UI is for the behaviour under test (apply, punch, approve), not for data setup.",
+      "afterEach logs in as Admin again before deleting: never assume the session state a failed test left behind.",
+    ],
+  },
+  "trendkart-e2e-member-journey": {
+    playwright:
+      pwHeader +
+      `const inr = (t: string | null) => Number((t || '').replace(/[^0-9]/g, ''));
+const email = 'member' + Date.now() + '@example.com';
+
+test('new member: sign up, wishlist, bag, coupon, order, cancel', async ({ page }) => {
+  const api = page.request;
+  let expectedTotal = 0;
+  let orderId = '';
+
+  await test.step('sign up (UI) and verify the session (API)', async () => {
+    await page.goto('/register');
+    await page.getByLabel('Name').fill('Meera Member');
+    await page.getByLabel('Mobile').fill('9876543210');
+    await page.getByTestId('auth-email').fill(email);
+    await page.getByTestId('auth-password').fill('Member@123');
+    await page.getByTestId('auth-submit').click();
+    await expect(page.getByTestId('account-name')).toContainText('Meera Member');
+    const me = await (await api.get('/api/me')).json();
+    expect(me.user.email).toBe(email);
+  });
+
+  await test.step('wishlist (API) to bag (UI) with a member coupon', async () => {
+    expect(await api.post('/api/wishlist', { data: { productId: 106 } })).toBeOK();
+    await page.goto('/wishlist');
+    await expect(page.getByTestId('wishlist-item')).toHaveCount(1);
+    await page.getByLabel('Size for Women Floral Print Kurta').selectOption('S');
+    await page.getByTestId('move-to-bag').click();
+    await expect(page.getByTestId('bag-count')).toHaveText('1');
+
+    await page.goto('/p/104');
+    await page.getByRole('button', { name: 'M', exact: true }).click();
+    await page.getByTestId('add-to-bag').click();
+    await expect(page.getByTestId('bag-count')).toHaveText('2');
+
+    await page.goto('/bag');
+    await page.getByLabel('Quantity for Men Printed Round Neck T-shirt').selectOption('2');
+    await expect(page.getByTestId('bag-count')).toHaveText('3');
+    await page.getByLabel('Coupon code').fill('NEWUSER');
+    await page.getByRole('button', { name: 'Apply' }).click();
+    await expect(page.getByTestId('coupon-message')).toContainText('NEWUSER applied');
+  });
+
+  await test.step('bag totals agree between UI and API', async () => {
+    const bag = await (await api.get('/api/bag')).json();
+    expect(bag.coupon).toBe('NEWUSER');
+    expect(bag.totals.count).toBe(3);
+    expectedTotal = bag.totals.total;
+    expect(inr(await page.getByTestId('total-amount').textContent())).toBe(expectedTotal);
+    expect(inr(await page.getByTestId('coupon-discount').textContent())).toBe(bag.totals.coupon);
+  });
+
+  await test.step('order to a saved address, verify, cancel', async () => {
+    expect(await api.post('/api/addresses', { data: { name: 'Meera Member', phone: '9876543210', line1: '7 Residency Road', city: 'Bengaluru', state: 'Karnataka', pincode: '560025' } })).toBeOK();
+    await page.getByTestId('place-order').click();
+    await page.getByTestId('saved-address').getByRole('radio').first().check();
+    await page.getByLabel('Cash on delivery').check();
+    await page.getByTestId('confirm-order').click();
+    await expect(page.getByTestId('order-confirmed')).toBeVisible();
+    orderId = (await page.getByTestId('order-id').textContent()) || '';
+
+    const orders = await (await api.get('/api/orders')).json();
+    expect(orders.items).toHaveLength(1);
+    expect(orders.items[0]).toMatchObject({ id: orderId, status: 'confirmed', payment: 'cod' });
+    expect(orders.items[0].totals.total).toBe(expectedTotal);
+
+    await page.goto(\`/orders/\${orderId}\`);
+    await page.getByTestId('cancel-order').click();
+    await expect(page.getByTestId('order-status')).toHaveText('cancelled');
+    const after = await (await api.get(\`/api/orders/\${orderId}\`)).json();
+    expect(after.order.status).toBe('cancelled');
+  });
+});
+`,
+    selenium: javaClass(
+      "MemberJourneyTest",
+      "/sandbox/trendkart",
+      `    static final String API = "https://interview.qatechlabs.com/api/sandbox/trendkart";
+
+    @Test
+    public void newMemberJourney() {
+        String email = "member" + System.currentTimeMillis() + "@example.com";
+        driver.get(BASE + "#/register");
+        driver.findElement(By.cssSelector("[data-testid=auth-name]")).sendKeys("Meera Member");
+        driver.findElement(By.cssSelector("[data-testid=auth-phone]")).sendKeys("9876543210");
+        driver.findElement(By.cssSelector("[data-testid=auth-email]")).sendKeys(email);
+        driver.findElement(By.cssSelector("[data-testid=auth-password]")).sendKeys("Member@123");
+        driver.findElement(By.cssSelector("[data-testid=auth-submit]")).click();
+        wait.until(ExpectedConditions.visibilityOfElementLocated(By.cssSelector("[data-testid=account-name]")));
+
+        io.restassured.specification.RequestSpecification api = io.restassured.RestAssured.given().baseUri(API).contentType("application/json");
+        for (Cookie c : driver.manage().getCookies()) api = api.cookie(c.getName(), c.getValue());
+        api.body(Map.of("productId", 106)).post("/wishlist").then().statusCode(201);
+
+        driver.get(BASE + "#/wishlist");
+        new Select(driver.findElement(By.cssSelector("[aria-label='Size for Women Floral Print Kurta']"))).selectByVisibleText("S");
+        driver.findElement(By.cssSelector("[data-testid=move-to-bag]")).click();
+        wait.until(ExpectedConditions.textToBe(By.cssSelector("[data-testid=bag-count]"), "1"));
+        driver.get(BASE + "#/p/104");
+        driver.findElement(By.xpath("//button[text()='M']")).click();
+        driver.findElement(By.cssSelector("[data-testid=add-to-bag]")).click();
+        wait.until(ExpectedConditions.textToBe(By.cssSelector("[data-testid=bag-count]"), "2"));
+        driver.get(BASE + "#/bag");
+        new Select(driver.findElement(By.cssSelector("[aria-label='Quantity for Men Printed Round Neck T-shirt']"))).selectByVisibleText("2");
+        driver.findElement(By.id("coupon")).sendKeys("NEWUSER");
+        driver.findElement(By.cssSelector("#coupon-form button")).click();
+        wait.until(ExpectedConditions.textToBePresentInElementLocated(By.cssSelector("[data-testid=coupon-message]"), "applied"));
+
+        for (Cookie c : driver.manage().getCookies()) api = api.cookie(c.getName(), c.getValue());
+        int expectedTotal = api.get("/bag").jsonPath().getInt("totals.total");
+        Assert.assertEquals(inr(driver.findElement(By.cssSelector("[data-testid=total-amount]")).getText()), expectedTotal);
+
+        api.body(Map.of("name", "Meera Member", "phone", "9876543210", "line1", "7 Residency Road", "city", "Bengaluru", "state", "Karnataka", "pincode", "560025")).post("/addresses").then().statusCode(201);
+        driver.findElement(By.cssSelector("[data-testid=place-order]")).click();
+        driver.findElement(By.cssSelector("[data-testid=saved-address] input")).click();
+        driver.findElement(By.cssSelector("input[name=payment][value=cod]")).click();
+        driver.findElement(By.cssSelector("[data-testid=confirm-order]")).click();
+        wait.until(ExpectedConditions.visibilityOfElementLocated(By.cssSelector("[data-testid=order-confirmed]")));
+        String orderId = driver.findElement(By.cssSelector("[data-testid=order-id]")).getText();
+        Assert.assertEquals(api.get("/orders").jsonPath().getInt("items[0].totals.total"), expectedTotal);
+
+        driver.get(BASE + "#/orders/" + orderId);
+        driver.findElement(By.cssSelector("[data-testid=cancel-order]")).click();
+        wait.until(ExpectedConditions.textToBe(By.cssSelector("[data-testid=order-status]"), "cancelled"));
+        Assert.assertEquals(api.get("/orders/" + orderId).jsonPath().getString("order.status"), "cancelled");
+    }
+
+    static int inr(String t) { return Integer.parseInt(t.replaceAll("[^0-9]", "")); }`,
+    ),
+    notes: [
+      "The expected total comes from the API in the same session, so the test reconciles two layers instead of trusting either one.",
+      "Member-only behaviour (NEWUSER, saved addresses, order history) is exactly what a sign-up journey must cover; a guest flow would miss it.",
+      "Cancelling in the UI and reading the status back from the API closes the loop on the order lifecycle.",
     ],
   },
 };

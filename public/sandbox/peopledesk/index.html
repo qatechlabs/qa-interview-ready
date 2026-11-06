@@ -70,7 +70,16 @@
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
   function route() { return location.hash.replace(/^#/, "") || "/auth/login"; }
   function go(p) { location.hash = p; }
+  /* The session lives in a cookie that every response rewrites, so calls run one at a time: a request
+     sent before the previous response arrived would carry a stale session and drop that change. */
+  var apiQueue = Promise.resolve();
   function api(method, path, body) {
+    var run = function () { return apiCall(method, path, body); };
+    var p = apiQueue.then(run, run);
+    apiQueue = p.catch(function () {});
+    return p;
+  }
+  function apiCall(method, path, body) {
     return fetch(API + path, { method: method, credentials: "include", headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined })
       .then(function (r) { return r.text().then(function (t) { var d = {}; try { d = t ? JSON.parse(t) : {}; } catch (e) {} return { ok: r.ok, status: r.status, data: d }; }); });
   }

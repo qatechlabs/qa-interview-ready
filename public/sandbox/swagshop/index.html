@@ -75,13 +75,22 @@
   var API = (window.LAB_API_BASE || "") + "/api/sandbox/swagshop";
   var app = document.getElementById("app");
   var S = { ready: false, user: null, cart: { items: [], count: 0, subtotal: 0, coupon: null, discount: 0, tax: 0, total: 0 }, products: [], categories: [], product: null, orders: [], order: null, lastOrder: null, info: null, query: { q: "", category: "", sort: "az" }, listKey: "" };
-  var ui = { menu: false, loginError: "", checkoutError: "", loggingIn: false, couponMsg: null, loading: false, flash: "" };
+  var ui = { menu: false, fetching: false, loginError: "", checkoutError: "", loggingIn: false, couponMsg: null, loading: false, flash: "" };
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
   function money(n) { return "$" + Number(n || 0).toFixed(2); }
   function slug(p) { return p.name.toLowerCase().replace(/[^a-z0-9]+/g, "-"); }
   function route() { return (location.hash.replace(/^#/, "") || "/").split("?")[0]; }
   function go(path) { location.hash = path; }
+  /* The session lives in a cookie that every response rewrites, so calls run one at a time: a request
+     sent before the previous response arrived would carry a stale session and drop that change. */
+  var apiQueue = Promise.resolve();
   function api(method, path, body) {
+    var run = function () { return apiCall(method, path, body); };
+    var p = apiQueue.then(run, run);
+    apiQueue = p.catch(function () {});
+    return p;
+  }
+  function apiCall(method, path, body) {
     return fetch(API + path, { method: method, credentials: "include", headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined })
       .then(function (r) { return r.text().then(function (t) { var d = {}; try { d = t ? JSON.parse(t) : {}; } catch (e) {} return { ok: r.ok, status: r.status, data: d }; }); });
   }
@@ -93,6 +102,7 @@
     get cartTotals() { return { subtotal: S.cart.subtotal, discount: S.cart.discount, tax: S.cart.tax, total: S.cart.total, coupon: S.cart.coupon }; },
     get lastOrder() { var o = S.lastOrder; return o ? { id: o.id, items: o.items.map(function (i) { return i.name; }), lines: o.items, subtotal: o.subtotal, discount: o.discount, coupon: o.coupon, tax: o.tax, total: o.total, status: o.status, payment: o.payment, info: o.info } : null; },
     get orders() { return S.orders; },
+    get order() { return S.order; },
     get ready() { return S.ready; },
     reset: function () { return api("POST", "/reset").then(function () { S.user = null; S.cart = { items: [], count: 0, subtotal: 0, coupon: null, discount: 0, tax: 0, total: 0 }; S.orders = []; S.lastOrder = null; S.info = null; location.hash = "#/"; render(); }); },
     refresh: function () { return loadSession().then(render); }
@@ -170,15 +180,15 @@
     }).join("");
     var cats = ['<option value="">All categories</option>'].concat(S.categories.map(function (c) { return '<option value="' + esc(c) + '"' + (c === S.query.category ? " selected" : "") + '>' + esc(c) + '</option>'; })).join("");
     return header() + '<main><div class="bar"><h2 class="title" data-test="title">Products</h2><span class="dim" data-test="product-count">' + S.products.length + ' item' + (S.products.length === 1 ? '' : 's') + (S.query.q ? ' for “' + esc(S.query.q) + '”' : '') + '</span>' +
-      '<div class="controls"><label>Category <select id="category" data-test="category-filter" aria-label="Filter by category">' + cats + '</select></label>' +
+      (ui.fetching && !S.products.length ? '</div>' : '<div class="controls"><label>Category <select id="category" data-test="category-filter" aria-label="Filter by category">' + cats + '</select></label>' +
       '<label>Sort <select class="product_sort_container" data-test="product-sort-container" aria-label="Sort products">' +
       [["az", "Name (A to Z)"], ["za", "Name (Z to A)"], ["lohi", "Price (low to high)"], ["hilo", "Price (high to low)"]].map(function (o) {
         return '<option value="' + o[0] + '"' + (o[0] === S.query.sort ? " selected" : "") + '>' + o[1] + '</option>';
-      }).join("") + '</select></label></div></div><div class="grid inventory_list" data-test="inventory-list">' + (items || '<p class="empty" data-test="no-products">No products match your search.</p>') + '</div></main>';
+      }).join("") + '</select></label></div></div>') + '<div class="grid inventory_list" data-test="inventory-list">' + (items || (ui.fetching ? '<p class="empty" aria-busy="true">Loading products…</p>' : '<p class="empty" data-test="no-products">No products match your search.</p>')) + '</div></main>';
   }
   function itemView() {
     var p = S.product;
-    if (!p) return header() + '<main><p data-test="not-found">Item not found.</p></main>';
+    if (!p) return header() + '<main><p' + (ui.fetching ? ' aria-busy="true">Loading…' : ' data-test="not-found">Item not found.') + '</p></main>';
     var line = S.cart.items.filter(function (i) { return i.productId === p.id; })[0];
     return header() + '<main><button class="back" data-test="back-to-products" data-go="/inventory">← Back to products</button>' +
       '<div class="panel" style="margin-top:12px;display:flex;gap:16px;align-items:center;flex-wrap:wrap">' +
@@ -202,7 +212,7 @@
     }).join("");
     var c = S.cart;
     return header() + '<main><div class="bar"><h2 class="title" data-test="title">Your Cart</h2></div>' +
-      '<div class="panel cart_list" data-test="cart-list">' + (rows || '<p class="empty" data-test="cart-empty">Your cart is empty.</p>') + '</div>' +
+      '<div class="panel cart_list" data-test="cart-list">' + (rows || (ui.fetching && !S.cart.count ? '<p class="empty" aria-busy="true">Loading…</p>' : '<p class="empty" data-test="cart-empty">Your cart is empty.</p>')) + '</div>' +
       (rows ? '<div class="panel coupon-box"><form id="coupon-form" class="coupon"><input id="coupon" data-test="coupon" placeholder="Coupon code (try SAVE10)" aria-label="Coupon code" value="' + esc(c.coupon || "") + '"><button type="submit" class="secondary" data-test="apply-coupon">Apply</button>' + (c.coupon ? '<button type="button" class="secondary" data-action="remove-coupon" data-test="remove-coupon">Remove</button>' : '') + '</form>' +
         (ui.couponMsg ? '<p class="' + (ui.couponMsg.ok ? "msg-ok" : "msg-err") + '" role="status" data-test="coupon-message">' + esc(ui.couponMsg.text) + '</p>' : '') +
         '<div class="summary_info"><div data-test="subtotal-label">Item total: ' + money(c.subtotal) + '</div>' + (c.discount ? '<div data-test="discount-label">Coupon ' + esc(c.coupon) + ': -' + money(c.discount) + '</div>' : '') + '<div data-test="tax-label">Tax: ' + money(c.tax) + '</div><div class="summary_total_label" data-test="total-label">Total: ' + money(c.total) + '</div></div></div>' : '') +
@@ -257,7 +267,7 @@
   }
   function orderView() {
     var o = S.order;
-    if (!o) return header() + '<main><p data-test="not-found">Order not found.</p></main>';
+    if (!o) return header() + '<main><p' + (ui.fetching ? ' aria-busy="true">Loading…' : ' data-test="not-found">Order not found.') + '</p></main>';
     var rows = o.items.map(function (i) { return '<div class="cart_item" data-test="inventory-item"><span class="cart_quantity" data-test="item-quantity">' + i.qty + '</span><div style="flex:1"><div class="inventory_item_name" data-test="inventory-item-name">' + esc(i.name) + '</div></div><div class="inventory_item_price" data-test="inventory-item-price">' + money(i.price * i.qty) + '</div></div>'; }).join("");
     return header() + '<main><button class="back" data-test="back-to-orders" data-go="/orders">← Back to orders</button><div class="bar" style="margin-top:10px"><h2 class="title" data-test="title">Order ' + esc(o.id) + ' <span class="badge ' + o.status + '" data-test="order-status">' + esc(o.status) + '</span></h2></div>' +
       '<div class="panel">' + rows + '<div class="summary_info" style="margin-top:12px"><div>Placed: ' + esc(new Date(o.placedAt).toLocaleString()) + '</div><div>Ship to: ' + esc(o.info.firstName + " " + o.info.lastName + ", " + o.info.postalCode) + '</div><div>Payment: ' + esc(o.payment) + '</div>' +
@@ -295,7 +305,14 @@
     else if (r.indexOf("/orders/") === 0) html = orderView();
     else if (r === "/account") html = accountView();
     else html = header() + '<main><h2>Page not found</h2></main>';
+    // Keep what the user has typed when a data refresh re-renders the same form (inputs are matched by id).
+    var typed = {};
+    var fields = app.querySelectorAll("input[id], select[id]");
+    for (var fi = 0; fi < fields.length; fi++) if (fields[fi].value) typed[fields[fi].id] = fields[fi].value;
+    var focused = document.activeElement && document.activeElement.id;
     app.innerHTML = html;
+    for (var id in typed) { var el = document.getElementById(id); if (el && !el.value) el.value = typed[id]; }
+    if (focused) { var fe = document.getElementById(focused); if (fe && fe.focus) fe.focus(); }
     mirrorTestIds();
     var titles = { "/": "SwagShop", "/inventory": "SwagShop | Products", "/cart": "SwagShop | Cart", "/orders": "SwagShop | My Orders", "/account": "SwagShop | My Account" };
     document.title = titles[r] || (S.product && r.indexOf("/item/") === 0 ? "SwagShop | " + S.product.name : "SwagShop");
@@ -312,7 +329,11 @@
     else if (r === "/cart" || r === "/checkout-step-one") p = refreshCart().then(function () { if (!S.info) return api("GET", "/checkout/summary").then(function (x) { if (x.ok) S.info = x.data.info; }); });
     else p = Promise.resolve();
     if (S.user && (r === "/inventory" || r.indexOf("/item/") === 0)) p = p.then(refreshCart);
-    return p.then(render, render);
+    // Render the new route at once from what is already known (like a real SPA), then again when the data lands.
+    ui.fetching = true;
+    render();
+    var done = function () { ui.fetching = false; render(); };
+    return p.then(done, done);
   }
   function onRoute() { if (!S.user && route() !== "/") return render(); load(); }
 
