@@ -215,8 +215,9 @@ function readTrace(entries) {
         if (!stepId || !s.isMainFrame) continue;
         if (!snapshots.has(stepId)) snapshots.set(stepId, {});
         snapshots.get(stepId)[s.phase || "after"] = s;
-      } else if (e.type === "before" && e.stepId && e.class !== "Test") {
-        calls.set(e.callId, e.stepId);
+      } else if (e.type === "before" && e.class && e.class !== "Test") {
+        // Playwright <= 1.63 links a library call to its test step with stepId; newer versions reuse the step's callId.
+        calls.set(e.callId, e.stepId || e.callId);
       } else if (e.type === "after" && calls.has(e.callId) && e.result && e.result.response && typeof e.result.response.status === "number") {
         const r = e.result.response;
         responses.set(calls.get(e.callId), { status: r.status, statusText: r.statusText, url: r.url });
@@ -323,7 +324,7 @@ async function renderer() {
   try { ({ chromium } = require("@playwright/test")); } catch { try { ({ chromium } = require("playwright")); } catch { /* no browser */ } }
   if (!chromium) return null;
   let browser;
-  try { browser = await chromium.launch(); } catch (e) { console.log("lab-evidence: cannot launch Chromium, using screencast frames:", e.message); return null; }
+  try { browser = await chromium.launch({ executablePath: process.env.LAB_EVIDENCE_CHROME || undefined }); } catch (e) { console.log("lab-evidence: cannot launch Chromium, using screencast frames:", e.message); return null; }
   const context = await browser.newContext({ javaScriptEnabled: false, viewport: { width: 1280, height: 720 } });
   const page = await context.newPage();
   await page.route(/.*/, (route) => {

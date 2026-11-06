@@ -1480,7 +1480,7 @@ public class SearchTest {
 
   await expect(page).toHaveURL(/inventory\\.html/);
   await expect(page.getByTestId('title')).toHaveText('Products');
-  await expect(page.getByTestId('inventory-item')).toHaveCount(12);
+  await expect(page.getByTestId('inventory-item')).toHaveCount(6);
 });
 
 test('locked out user sees an error', async ({ page }) => {
@@ -1508,7 +1508,7 @@ test('locked out user sees an error', async ({ page }) => {
         login("standard_user");
         wait.until(ExpectedConditions.urlContains("/inventory.html"));
         Assert.assertEquals(driver.findElement(By.cssSelector("[data-test=title]")).getText(), "Products");
-        Assert.assertEquals(driver.findElements(By.cssSelector("[data-test=inventory-item]")).size(), 12);
+        Assert.assertEquals(driver.findElements(By.cssSelector("[data-test=inventory-item]")).size(), 6);
     }
 
     @Test
@@ -3092,7 +3092,7 @@ test.describe('Login @smoke', () => {
   test('standard user lands on the products page', async ({ app }) => {
     await app.login.login(users.standard.username, users.standard.password);
     await expect(app.inventory.title).toHaveText('Products');
-    await expect(app.inventory.items).toHaveCount(12);
+    await expect(app.inventory.items).toHaveCount(6);
   });
 
   test('locked out user is told why', async ({ app }) => {
