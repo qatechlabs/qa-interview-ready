@@ -1566,3 +1566,361 @@ test('product page looks right', async ({ page }) => {
 });
 // Update after an intended change: npx playwright test --update-snapshots
 ```
+
+# Module: Advanced tooling and tricky automation problems
+
+## What's new in Selenium 4? Explain relative locators, CDP and BiDi.
+@topic selenium
+
+### 60s
+Selenium 4 moved fully to the W3C WebDriver standard, which made browser behaviour more consistent. It added relative locators like above, below, toLeftOf, toRightOf and near; element screenshots; opening new tabs and windows directly; a redesigned Grid with Docker and observability support; and Selenium Manager, which downloads drivers automatically. It also exposed Chrome DevTools Protocol for Chromium browsers, for network interception, geolocation and console logs, and is moving to WebDriver BiDi, a cross-browser standard for two-way communication like listening to console and network events.
+
+### Explain
+- **Relative locators:** `RelativeLocator.with(By.tagName("input")).below(By.id("email"))`.
+- **CDP (Chromium only):** `DevTools` API for network conditions, mocking, performance metrics.
+- **BiDi:** event-driven, cross-browser replacement for CDP features (log, network, script modules), still evolving.
+- **Other:** `getDomAttribute` / `getDomProperty`, `Duration`-based timeouts, `ChromiumDriver` base class, deprecation of `DesiredCapabilities` in favour of Options classes.
+
+### Example
+Using CDP to emulate a slow 3G network and verify the checkout shows a skeleton loader instead of a blank page.
+
+### Code java | Relative locator and CDP network throttling
+```java
+WebElement password = driver.findElement(
+    RelativeLocator.with(By.tagName("input")).below(By.id("email")));
+
+DevTools devTools = ((HasDevTools) driver).getDevTools();
+devTools.createSession();
+devTools.send(Network.enable(Optional.empty(), Optional.empty(), Optional.empty()));
+devTools.send(Network.emulateNetworkConditions(false, 400, 50_000, 25_000,
+        Optional.of(ConnectionType.CELLULAR3G), Optional.empty(), Optional.empty(), Optional.empty()));
+```
+
+## How do you handle Shadow DOM elements?
+@topic selenium
+
+### 60s
+Shadow DOM encapsulates part of a page inside a shadow root, used by web components, so normal CSS or XPath from the document can't reach inside. In Selenium 4, I find the host element, call getShadowRoot, and then use findElement with a CSS selector inside it; XPath isn't supported within shadow roots. For nested components I repeat the step for each level. Playwright pierces open shadow roots automatically with its CSS and role locators, so no special handling is needed. Closed shadow roots can't be accessed by either tool, which is worth raising with developers.
+
+### Explain
+- `SearchContext shadow = host.getShadowRoot();`
+- Only CSS selectors work inside `SearchContext` from a shadow root.
+- Older approach: `executeScript("return arguments[0].shadowRoot", host)`.
+- Playwright: `page.locator('my-app >> button')` isn't needed; `page.getByRole('button', { name: 'Save' })` works through open shadow roots.
+
+### Example
+A design-system date picker is a web component `<ds-date-picker>`; its input lives inside the shadow root.
+
+### Code java | Selenium 4 shadow root
+```java
+WebElement host = driver.findElement(By.cssSelector("ds-date-picker"));
+SearchContext shadow = host.getShadowRoot();
+shadow.findElement(By.cssSelector("input.ds-input")).sendKeys("25/12/2026");
+
+// Nested component
+SearchContext inner = shadow.findElement(By.cssSelector("ds-calendar")).getShadowRoot();
+inner.findElement(By.cssSelector("button[aria-label='Next month']")).click();
+```
+
+## How do you automate flows that involve OTP, CAPTCHA or email verification?
+@topic framework
+
+### 60s
+CAPTCHA is designed to block automation, so I don't try to solve it. In test environments I ask developers to disable it, use the provider's test keys that always pass, or whitelist test traffic. For OTP, I avoid reading real SMS: the test environment can use a fixed OTP for test numbers, expose a test-only API to fetch the latest OTP, or I read it from the database. For email verification, I use a test inbox service like Mailosaur, MailHog or Mailpit, fetch the email through its API and extract the link or code.
+
+### Explain
+Options ranked:
+1. Test-environment configuration (fixed OTP, CAPTCHA test keys, feature flags).
+2. Backdoor/test-only APIs secured and disabled in production.
+3. Read from DB or message queue.
+4. Test inbox APIs for email; virtual numbers for SMS (last resort, flaky and costly).
+
+Keep at least one manual or monitored check in production that the real CAPTCHA/OTP works.
+
+### Example
+Sign-up test: register with `qa+<uuid>@inbox.mailpit.local`, poll Mailpit's API for the verification email, extract the link with a regex, open it, and assert the account is active.
+
+### Code java | Fetching a verification link from Mailpit
+```java
+String email = "qa+" + UUID.randomUUID() + "@test.local";
+signupPage.register(email, "Valid@123");
+
+String link = await().atMost(Duration.ofSeconds(30)).pollInterval(Duration.ofSeconds(2))
+    .until(() -> given().baseUri("http://mailpit:8025")
+                        .queryParam("query", "to:" + email)
+                        .get("/api/v1/search")
+                        .jsonPath().getString("messages[0].ID"), notNullValue())
+    .transform(id -> given().baseUri("http://mailpit:8025").get("/api/v1/message/" + id)
+                            .jsonPath().getString("Text"))
+    .transform(text -> text.replaceAll("(?s).*(https://\\S+/verify\\?token=\\S+).*", "$1"));
+
+driver.get(link);
+```
+
+## What is a CTE in SQL and how do you use SQL to test data migrations?
+@topic sql
+
+### 60s
+A CTE, Common Table Expression, is a named temporary result defined with WITH at the start of a query. It makes complex queries readable by breaking them into steps, and recursive CTEs can walk hierarchies like org charts or category trees. For data migrations, I use SQL to compare source and target: row counts per table and per key group, checksums or hashes of important columns, EXCEPT or MINUS queries to find rows that differ, null and default checks, referential integrity, and spot checks on transformed fields like split names or converted currencies.
+
+### Explain
+Migration test checklist:
+- Counts: total and grouped (by status, by month).
+- Completeness: every source key exists in the target.
+- Accuracy: transformed values correct (sample + full diff where possible).
+- Integrity: foreign keys, uniqueness, no orphans.
+- Edge data: nulls, special characters, max lengths, time zones.
+- Performance of the migration job and rollback plan.
+
+### Example
+Migrating `customers_old` to `customers` where `full_name` is split into `first_name` and `last_name`: compare counts, then diff the recombined name.
+
+### Code sql | CTE-based migration diff
+```sql
+WITH src AS (
+  SELECT id, LOWER(TRIM(email)) AS email, full_name FROM customers_old
+),
+tgt AS (
+  SELECT id, email, CONCAT(first_name, ' ', last_name) AS full_name FROM customers
+)
+SELECT 'missing_in_target' AS issue, s.id FROM src s LEFT JOIN tgt t ON t.id = s.id WHERE t.id IS NULL
+UNION ALL
+SELECT 'value_mismatch', s.id FROM src s JOIN tgt t ON t.id = s.id
+WHERE s.email <> t.email OR s.full_name <> t.full_name;
+```
+
+## How do you review automation code? What does good test code look like?
+@topic framework
+
+### 60s
+I review test code with the same standards as production code. Good test code is readable, so the test name and steps describe the behaviour; independent, creating its own data and not relying on order; deterministic, with no sleeps, proper waits and controlled data; focused, testing one behaviour with meaningful assertions and clear failure messages; at the right level of the pyramid; and maintainable, using page objects and helpers without duplication, with no hard-coded secrets or environment URLs. I also check it fails for the right reason, ideally by seeing it fail once.
+
+### Explain
+Review checklist:
+- Name says what and expected outcome (`cancelledOrderShowsRefundBanner`).
+- Arrange–Act–Assert structure.
+- No `Thread.sleep`, no `try/catch` swallowing failures.
+- Locators stable (role/test-id), not absolute XPath.
+- Assertions specific (exact text/value), not just "not null".
+- Test data unique and cleaned up.
+- Tags/groups correct; runs in parallel.
+- Logs/reports useful on failure.
+
+### Example
+A PR added a test that always passed because it caught the assertion error in a `try` block and only logged it. Review caught it; the test was failing silently for a real bug.
+
+### Code java | Before and after review
+```java
+// Before
+@Test public void test1() throws Exception {
+    driver.findElement(By.xpath("/html/body/div[3]/button")).click();
+    Thread.sleep(5000);
+    try { Assert.assertTrue(driver.getPageSource().contains("Success")); } catch (AssertionError e) { log(e); }
+}
+
+// After
+@Test(groups = "regression")
+public void savingProfileShowsConfirmation() {
+    profilePage.updatePhone(TestData.uniquePhone()).save();
+    Assert.assertEquals(profilePage.toastText(), "Profile updated", "Toast after saving profile");
+}
+```
+
+## What testing metrics do you report to stakeholders?
+@topic strategy
+
+### 60s
+I report metrics that support decisions, not vanity numbers. For a release: test execution progress and pass rate, requirement or risk coverage, open defects by severity and their trend, and known risks with a clear go or no-go recommendation. For automation health: suite duration, flaky test rate, pass rate over time and coverage of critical journeys. For process improvement: defect leakage to production, escaped defects by area, and mean time to detect or fix. I keep it visual and short, and always explain what the numbers mean and what action is needed.
+
+### Explain
+Good metrics are actionable, trend-based and hard to game. Avoid:
+- "Number of test cases" as a productivity measure.
+- Raw bug counts per tester.
+- 100% automation targets.
+
+Pair numbers with narrative: "Pass rate is 96%; the 4% are two known bugs in loyalty points, both P3, accepted by the PO."
+
+### Example
+Weekly dashboard: regression pass rate 97% (↑2), flaky rate 1.5% (↓), 3 open P2 bugs (owners assigned), leakage last release 2 bugs (both in promotions → adding contract tests there).
+
+### Code sql | Escaped defects by module
+```sql
+SELECT module,
+       COUNT(*) FILTER (WHERE found_in = 'PROD') AS escaped,
+       COUNT(*) AS total,
+       ROUND(100.0 * COUNT(*) FILTER (WHERE found_in = 'PROD') / COUNT(*), 1) AS leakage_pct
+FROM defects
+WHERE release = '3.2'
+GROUP BY module
+ORDER BY leakage_pct DESC;
+```
+
+## How do you use pytest fixtures and parametrization?
+@topic programming
+
+### 60s
+pytest fixtures are functions decorated with pytest.fixture that provide setup and teardown for tests. A test asks for a fixture just by naming it as a parameter. Code before yield is setup, code after yield is teardown. Fixtures have scopes, function, class, module or session, so I can create a browser or API session once per session and fresh test data per test, and share fixtures across files with conftest.py. pytest.mark.parametrize runs one test with many input sets, and fixtures themselves can be parametrised, for example to run every test on two browsers.
+
+### Explain
+- `conftest.py` fixtures are auto-discovered.
+- `autouse=True` for fixtures every test needs.
+- `request.param` in parametrised fixtures.
+- Markers: `@pytest.mark.smoke`, run with `pytest -m smoke`.
+- Plugins: pytest-xdist (parallel), pytest-html, allure-pytest, pytest-playwright.
+
+### Example
+A session-scoped authenticated API client, a function-scoped user that's deleted after each test, and a test parametrised over three roles.
+
+### Code python | Fixtures and parametrize
+```python
+# conftest.py
+import pytest, requests, uuid
+
+@pytest.fixture(scope="session")
+def api(base_url, admin_token):
+    s = requests.Session()
+    s.headers["Authorization"] = f"Bearer {admin_token}"
+    s.base_url = base_url
+    yield s
+    s.close()
+
+@pytest.fixture
+def user(api):
+    u = api.post(f"{api.base_url}/users", json={"email": f"qa+{uuid.uuid4()}@x.com"}).json()
+    yield u
+    api.delete(f"{api.base_url}/users/{u['id']}")
+
+# test_roles.py
+@pytest.mark.parametrize("role, can_refund", [("admin", True), ("support", True), ("customer", False)])
+def test_refund_permission(api, user, role, can_refund):
+    api.patch(f"{api.base_url}/users/{user['id']}", json={"role": role})
+    r = api.post(f"{api.base_url}/refunds", json={"orderId": "ORD-1", "asUser": user["id"]})
+    assert (r.status_code == 201) == can_refund
+```
+
+## What is the Screenplay pattern and how is it different from POM?
+@topic framework
+
+### 60s
+The Screenplay pattern models tests around actors who have abilities, like browsing the web or calling an API, perform tasks, like "place an order", made of smaller interactions, like click or enter, and ask questions to verify state. Page Object Model is organised around pages and their elements. Screenplay follows SOLID principles more strictly, keeps classes small and composable, and scales better for large suites with many roles and channels, but it has more classes and a steeper learning curve. Serenity BDD in Java and Serenity/JS implement it.
+
+### Explain
+| | POM | Screenplay |
+|---|---|---|
+| Organised by | Pages | Actors, tasks, interactions, questions |
+| Class size | Pages can grow large | Small, single-purpose |
+| Reuse | Page methods | Composable tasks |
+| Multi-channel (UI + API) | Separate layers | Same actor with multiple abilities |
+| Learning curve | Low | Higher |
+
+### Example
+"Given Priya, a customer, when she places an order for 2 mugs, then she should see the order confirmation." Priya is the actor; `PlaceOrder.of(2, "Mug")` is a task built from interactions.
+
+### Code java | Screenplay with Serenity
+```java
+Actor priya = Actor.named("Priya").whoCan(BrowseTheWeb.with(driver));
+
+priya.attemptsTo(
+    Open.url("/products/mug"),
+    SelectQuantity.of(2),
+    Click.on(ProductPage.ADD_TO_CART),
+    Checkout.withUpi("priya@upi")
+);
+
+priya.should(seeThat(OrderConfirmation.message(), equalTo("Thank you for your order")));
+```
+
+## How do you test file processing, batch jobs or ETL pipelines?
+@topic strategy
+
+### 60s
+For batch and ETL jobs, I test the data rather than a UI. I prepare controlled input files or source records covering normal, boundary and bad data: wrong formats, missing columns, duplicates, special characters, very large files. I trigger the job, wait for it to finish, then verify the output: row counts, transformations, rejected-record handling and error logs, idempotency when the job is rerun, and behaviour when it fails halfway and restarts. I also check performance with production-sized volumes and that schedules, notifications and alerts work.
+
+### Explain
+Validation layers:
+- **Schema:** columns, types, mandatory fields.
+- **Completeness:** source count = target count + rejected count.
+- **Accuracy:** transformation rules on sample and full data.
+- **Uniqueness and integrity.**
+- **Reconciliation:** totals and checksums match (sum of amounts).
+- **Reruns and recovery.**
+- Tools: SQL, Python/pandas, Great Expectations, dbt tests.
+
+### Example
+A nightly job imports 2 million transactions from a bank CSV. Tests cover a file with a missing header, a row with a negative amount, a duplicate transaction ID, and a rerun of the same file (must not double-insert).
+
+### Code python | Reconciliation with pandas
+```python
+import pandas as pd
+
+src = pd.read_csv("input/transactions_2026-11-05.csv")
+tgt = pd.read_sql("SELECT txn_id, amount FROM transactions WHERE batch_date = '2026-11-05'", conn)
+rej = pd.read_sql("SELECT txn_id FROM rejected_txns WHERE batch_date = '2026-11-05'", conn)
+
+assert len(src) == len(tgt) + len(rej), "Counts don't reconcile"
+assert tgt["txn_id"].is_unique, "Duplicate transactions loaded"
+valid = src[~src["txn_id"].isin(rej["txn_id"])]
+assert round(valid["amount"].sum(), 2) == round(tgt["amount"].sum(), 2), "Amount totals differ"
+```
+
+## How do you test a feature behind a feature flag?
+@topic strategy
+
+### 60s
+Feature flags let teams deploy code without exposing it to everyone, then turn it on for a percentage of users, specific segments or internal testers. I test both states, flag on and flag off, to make sure the old behaviour still works when the flag is off and the new behaviour works when it's on. I also test switching the flag while users are mid-session, targeting rules, and that the default is safe if the flag service is down. In automation, I set the flag per test through the flag provider's API or a test override header, never by relying on whatever state it's in.
+
+### Explain
+Risks with flags:
+- Combinatorial explosion with many flags: test meaningful combinations, not all.
+- Stale flags: code paths that nobody tests anymore. Push to remove flags after rollout.
+- Inconsistent experience across services reading the flag at different times.
+
+Tools: LaunchDarkly, Unleash, Flagsmith, ConfigCat, or in-house config.
+
+### Example
+A new checkout flow is behind `new_checkout`. Regression runs once with the flag off (current customers) and the checkout suite runs with it on; a canary rollout to 5% of users is monitored for conversion and errors before going wider.
+
+### Code typescript | Forcing a flag per test
+```typescript
+test.describe('new checkout', () => {
+  test.beforeEach(async ({ context }) => {
+    await context.setExtraHTTPHeaders({ 'x-feature-override': 'new_checkout=on' });
+  });
+  test('shows one-page checkout', async ({ page }) => {
+    await page.goto('/checkout');
+    await expect(page.getByRole('heading', { name: 'Checkout' })).toBeVisible();
+    await expect(page.getByTestId('step-indicator')).toHaveCount(0);
+  });
+});
+```
+
+## How do you handle environment instability and test data in shared environments?
+@topic strategy
+
+### 60s
+Shared environments break tests for reasons unrelated to the code: other teams deploying, data being changed or deleted, services down, or limited capacity. I reduce the impact by running a quick health check before the suite and failing fast with a clear "environment down" message; creating each test's data with unique identifiers instead of relying on shared records; mocking or virtualizing unstable third-party dependencies; tagging environment failures separately from product failures in reports; and pushing for ephemeral, per-branch environments with containers so each run has its own clean setup.
+
+### Explain
+Tactics:
+- Pre-suite smoke/health endpoint checks.
+- Data isolation per run (prefixes, tenants, separate accounts).
+- Seeding scripts to reset known reference data.
+- Retry only on infrastructure errors (connection refused, 502/503), never on assertion failures.
+- Environment booking/calendar for performance tests.
+- Long-term: ephemeral environments (Kubernetes namespaces, preview deploys).
+
+### Example
+Nightly runs failed 3 times a week because another team reset the QA database at 2 a.m. Moving the run to 4 a.m. was a quick fix; the lasting fix was a dedicated namespace spun up per run with seeded data.
+
+### Code java | Pre-suite health check
+```java
+@BeforeSuite(alwaysRun = true)
+public void environmentHealthCheck() {
+    for (String svc : List.of("/api/health", "/auth/health", "/payments/health")) {
+        int code = given().baseUri(Config.get("baseUrl")).get(svc).statusCode();
+        if (code != 200) {
+            throw new SkipException("Environment unhealthy: " + svc + " returned " + code);
+        }
+    }
+}
+```
