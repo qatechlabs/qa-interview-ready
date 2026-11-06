@@ -1,0 +1,91 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --surface-2: #f1f5f9;
+  --border: #e2e8f0;
+  --text: #0f172a;
+  --muted: #475569;
+  --accent: #4f46e5;
+  --accent-fg: #ffffff;
+  --accent-soft: #eef2ff;
+  --good: #059669;
+  --warn: #d97706;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b1020;
+    --surface: #111833;
+    --surface-2: #18213f;
+    --border: #253055;
+    --text: #e6e9f5;
+    --muted: #9aa4c4;
+    --accent: #818cf8;
+    --accent-fg: #0b1020;
+    --accent-soft: #1d2550;
+    --good: #34d399;
+    --warn: #fbbf24;
+    color-scheme: dark;
+  }
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.875rem;
+}
+
+.btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition disabled:opacity-50;
+}
+.btn-primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.btn-primary:hover { filter: brightness(1.08); }
+.btn-ghost {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+.btn-ghost:hover { background: var(--surface-2); }
+
+.chip {
+  @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.muted { color: var(--muted); }
+.accent { color: var(--accent); }
+
+.inline-code {
+  @apply rounded px-1 py-0.5 font-mono text-[0.85em];
+  background: var(--surface-2);
+}
+
+/* Shiki dual theme */
+.code-block pre {
+  @apply overflow-x-auto p-4 text-[13px] leading-relaxed;
+  background: var(--surface-2) !important;
+}
+.code-block pre span { color: var(--shiki-light); }
+@media (prefers-color-scheme: dark) {
+  .code-block pre span { color: var(--shiki-dark); }
+}
+
+.flip-enter { animation: fadeUp 0.25s ease-out; }
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
