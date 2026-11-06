@@ -56,9 +56,55 @@ body {
 }
 
 .card {
+  position: relative;
+  isolation: isolate;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 0.875rem;
+}
+
+/* Pointer-following light, as on the portfolio. PointerEffects.tsx sets --spot-x / --spot-y. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(
+    42rem circle at var(--spot-x, 70%) var(--spot-y, 20%),
+    color-mix(in oklab, var(--rose-500) 11%, transparent),
+    transparent 55%
+  );
+  transition: background 0.2s linear;
+}
+.card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+  background: radial-gradient(
+    26rem circle at var(--spot-x, 50%) var(--spot-y, 50%),
+    color-mix(in oklab, var(--rose-500) 14%, transparent),
+    transparent 60%
+  );
+}
+.card.is-lit::before { opacity: 1; }
+
+/* Gentle 3D tilt toward the pointer (opt-in per card). */
+.card-tilt {
+  transform: perspective(1100px) rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg));
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.35s;
+  will-change: transform;
+}
+.card-tilt.is-lit { box-shadow: 0 18px 40px -24px color-mix(in oklab, var(--rose-500) 35%, transparent); }
+
+@media (prefers-reduced-motion: reduce) {
+  body::before, .card::before { transition: none; }
+  .card-tilt { transform: none; transition: none; }
 }
 
 .btn {
@@ -67,6 +113,9 @@ body {
 .btn-primary {
   background: var(--accent);
   color: var(--accent-fg);
+  /* magnetic: pulls slightly toward the pointer */
+  transform: translate(var(--mag-x, 0px), var(--mag-y, 0px));
+  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1), filter 0.15s;
 }
 .btn-primary:hover { filter: brightness(1.08); }
 .btn-ghost {

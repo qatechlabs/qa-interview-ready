@@ -90,7 +90,7 @@ export default async function LabsIndex({ searchParams }: { searchParams?: { git
             const app = LAB_APPS.find((a) => a.id === s.app)!;
             const locked = !s.free && !architect;
             return (
-              <Link key={s.id} href={`/labs/${s.id}`} className="card flex flex-col p-4 transition hover:-translate-y-0.5 hover:shadow-lg">
+              <Link key={s.id} href={`/labs/${s.id}`} className="card card-tilt flex flex-col p-4">
                 <div className="mb-2 flex flex-wrap gap-1.5">
                   <span className="chip">{s.level}</span>
                   <span className="chip">~{s.minutes} min</span>
@@ -137,7 +137,7 @@ export default async function LabsIndex({ searchParams }: { searchParams?: { git
               {list.map((s) => {
                 const locked = !s.free && !premium;
                 return (
-                  <Link key={s.id} href={`/labs/${s.id}`} className="card flex flex-col p-4 transition hover:-translate-y-0.5 hover:shadow-lg">
+                  <Link key={s.id} href={`/labs/${s.id}`} className="card card-tilt flex flex-col p-4">
                     <div className="mb-2 flex flex-wrap gap-1.5">
                       <span className="chip">{s.level}</span>
                       <span className="chip">~{s.minutes} min</span>

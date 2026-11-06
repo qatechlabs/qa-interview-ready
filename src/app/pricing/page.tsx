@@ -102,7 +102,7 @@ export default async function PricingPage({ searchParams }: { searchParams: { we
       </div>
       <div className="grid gap-4 md:grid-cols-3">
         {cards.map(({ t, cta, note, best }) => (
-          <div key={t.id} className="card relative flex flex-col p-6" style={best ? { borderColor: "var(--accent)", boxShadow: "0 0 0 1px var(--accent)" } : undefined}>
+          <div key={t.id} className="card card-tilt relative flex flex-col p-6" data-tilt="2.5" style={best ? { borderColor: "var(--accent)", boxShadow: "0 0 0 1px var(--accent)" } : undefined}>
             {best && <span className="absolute -top-3 left-5 rounded-full px-3 py-0.5 text-xs font-semibold" style={{ background: "var(--accent)", color: "var(--accent-fg)" }}>Best value</span>}
             <h2 className="text-xl font-bold">{t.name}</h2>
             <p className="text-sm muted">{t.tagline}</p>
