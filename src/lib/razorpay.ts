@@ -14,6 +14,12 @@ function authHeader() {
   return "Basic " + Buffer.from(`${id}:${secret}`).toString("base64");
 }
 
+export class RazorpayError extends Error {
+  constructor(message: string, public status: number) {
+    super(message);
+  }
+}
+
 async function rp<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API}${path}`, {
     ...init,
@@ -23,7 +29,7 @@ async function rp<T>(path: string, init?: RequestInit): Promise<T> {
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
     const msg = (body as { error?: { description?: string } })?.error?.description || res.statusText;
-    throw new Error(`Razorpay ${path}: ${msg}`);
+    throw new RazorpayError(`Razorpay ${path}: ${msg}`, res.status);
   }
   return body as T;
 }
@@ -47,7 +53,13 @@ export interface RazorpayPayment {
   refund_status: string | null;
 }
 
+/** Razorpay rejects orders below 100 paise (₹1). */
+export const MIN_AMOUNT = 100;
+
 export function createOrder() {
+  if (!Number.isInteger(PRICE.amount) || PRICE.amount < MIN_AMOUNT) {
+    throw new Error(`PRICE_AMOUNT must be an integer of at least ${MIN_AMOUNT} (smallest currency unit); got ${PRICE.amount}`);
+  }
   return rp<RazorpayOrder>("/orders", {
     method: "POST",
     body: JSON.stringify({
