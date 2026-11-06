@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { PRICE, SITE } from "@/lib/config";
-import { createOrder, razorpayConfigured } from "@/lib/razorpay";
+import { RazorpayError, createOrder, razorpayConfigured } from "@/lib/razorpay";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +20,9 @@ export async function POST() {
     });
   } catch (e) {
     console.error(e);
+    if (e instanceof RazorpayError && e.status === 401) {
+      return NextResponse.json({ error: "Payment provider rejected the API keys. Please contact support." }, { status: 401 });
+    }
     return NextResponse.json({ error: "Couldn't start checkout. Please try again." }, { status: 502 });
   }
 }
