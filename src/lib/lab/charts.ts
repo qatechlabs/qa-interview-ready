@@ -30,9 +30,10 @@ export interface Segment {
 export function donutChart(segments: Segment[], opts: { title?: string; centre?: string; sub?: string; palette?: ChartPalette; width?: number } = {}): string {
   const pal = opts.palette ?? DARK_PALETTE;
   const W = opts.width ?? 420;
-  const H = 200;
+  const top = opts.title ? 34 : 0;
+  const H = 200 + top;
   const cx = 100;
-  const cy = 100;
+  const cy = 100 + top;
   const r = 68;
   const stroke = 24;
   const c = 2 * Math.PI * r;
@@ -50,7 +51,7 @@ export function donutChart(segments: Segment[], opts: { title?: string; centre?:
   const legend = segments
     .map((s, i) => {
       const pct = total ? Math.round((s.value / total) * 100) : 0;
-      const y = 48 + i * 30;
+      const y = 48 + top + i * 30;
       return `<rect x="215" y="${y - 10}" width="14" height="14" rx="3" fill="${s.color}"/><text x="238" y="${y + 2}" font-size="14" fill="${pal.ink}" ${FONT}>${esc(s.label)}</text><text x="${W - 12}" y="${y + 2}" font-size="14" text-anchor="end" fill="${pal.muted}" ${FONT}>${s.value} · ${pct}%</text>`;
     })
     .join("");
@@ -98,7 +99,7 @@ export function barChart(rows: BarRow[], series: { name: string; color: string }
         .join("");
       return `<text x="${left - 10}" y="${y + rowH / 2 + 4}" text-anchor="end" font-size="12" fill="${pal.ink}" ${FONT}><title>${esc(r.label)}</title>${esc(trunc(r.label))}</text>
 <rect x="${left}" y="${y + 6}" width="${W - left - right}" height="${rowH - 12}" rx="3" fill="${pal.track}"/>${segs}
-<text x="${(x + 8).toFixed(1)}" y="${y + rowH / 2 + 4}" font-size="12" fill="${pal.muted}" ${FONT}>${esc(r.note ?? fmt(total))}</text>`;
+<text x="${W - right + 8}" y="${y + rowH / 2 + 4}" font-size="12" fill="${pal.muted}" ${FONT}>${esc(r.note ?? fmt(total))}</text>`;
     })
     .join("\n");
   const legend = series
