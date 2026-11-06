@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { GitHubError, githubConfigured } from "@/lib/github/app";
 import { getGitHubUser } from "@/lib/github/user";
 import { commitLab, validateFiles } from "@/lib/github/labrepo";
-import { getScenario } from "@/lab/scenarios";
-import { hasPremium } from "@/lib/access";
+import { getScenario, isWorkspace } from "@/lab/scenarios";
+import { hasTier } from "@/lib/access";
 import { SITE } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +19,7 @@ export async function POST(req: Request) {
   const body = (await req.json().catch(() => ({}))) as { scenarioId?: unknown; files?: unknown; summary?: unknown };
   const scenario = typeof body.scenarioId === "string" ? getScenario(body.scenarioId) : undefined;
   if (!scenario) return NextResponse.json({ error: "Unknown scenario." }, { status: 400 });
-  if (!scenario.free && !(await hasPremium())) return NextResponse.json({ error: "This lab needs full access." }, { status: 403 });
+  if (!scenario.free && !(await hasTier(isWorkspace(scenario) ? "architect" : "pro"))) return NextResponse.json({ error: `This lab needs the ${isWorkspace(scenario) ? "Architect" : "Pro"} tier.` }, { status: 403 });
   try {
     const files = validateFiles(body.files);
     const summary = typeof body.summary === "string" ? body.summary.slice(0, 120).replace(/[\r\n]+/g, " ") : "";

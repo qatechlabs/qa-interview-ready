@@ -1,22 +1,29 @@
 import { NextResponse } from "next/server";
-import { PRICE, SITE } from "@/lib/config";
-import { RazorpayError, createOrder, razorpayConfigured } from "@/lib/razorpay";
+import { SITE, formatPrice, isTierId, tier, tierAtLeast } from "@/lib/config";
+import { getAccess } from "@/lib/access";
+import { RazorpayError, createOrder, razorpayConfigured, upgradeAmount } from "@/lib/razorpay";
 
 export const dynamic = "force-dynamic";
 
-export async function POST() {
+/** Body: { tier }. A visitor with a lower tier already is charged the difference. */
+export async function POST(req: Request) {
   if (!razorpayConfigured()) {
     return NextResponse.json({ error: "Payments are not configured yet." }, { status: 503 });
   }
+  const body = (await req.json().catch(() => ({}))) as { tier?: unknown };
+  const target = isTierId(body.tier) ? tier(body.tier) : tier("prep");
+  const access = await getAccess();
+  if (access && tierAtLeast(access.tier, target.id)) return NextResponse.json({ error: `You already have ${tier(access.tier).name}.` }, { status: 400 });
+  const upgradeFrom = access ? { paymentId: access.paymentId, tier: tier(access.tier) } : undefined;
   try {
-    const order = await createOrder();
+    const order = await createOrder(target, upgradeFrom);
     return NextResponse.json({
       orderId: order.id,
       amount: order.amount,
       currency: order.currency,
       keyId: process.env.RAZORPAY_KEY_ID,
       name: SITE.name,
-      description: `${PRICE.label}: every level and question`,
+      description: upgradeFrom ? `Upgrade ${upgradeFrom.tier.name} → ${target.name} (${formatPrice(upgradeAmount(target, upgradeFrom.tier))})` : `${target.name}: ${target.tagline}`,
     });
   } catch (e) {
     console.error(e);

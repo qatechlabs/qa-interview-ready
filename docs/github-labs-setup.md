@@ -70,13 +70,14 @@ Open https://interview.qatechlabs.com/api/github/status first. It lists any miss
 2. Open a lab and press **Run tests**. Within a few seconds the lab shows a link to the new repo `qatechlabs/lab-<your-login>` and the commit that was just made.
 3. The learner (you, in this test) receives a collaborator invitation by email; accepting it gives them push access. The repo is public, the commits are authored in their name, so they show up on their GitHub profile.
 4. On a real-site scenario, press **Run on GitHub**. The run appears under the repo's Actions tab and the result comes back to the lab in about two minutes.
-5. Open a **framework workspace** (the "Build a framework from scratch" section on /labs), add `playwright.config.ts`, `pages/`, `fixtures.ts` and `tests/` and press **Run on GitHub**. The workflow runs with the learner's own config and grades the project against the framework rubric.
+5. Every run (browser or GitHub) opens the run report in a new tab and downloads the Word evidence document; the Actions run records a Playwright trace that the evidence step turns into one screenshot per step.
+6. Open a **framework workspace** (the "Build a framework from scratch" section on /labs), add `playwright.config.ts`, `pages/`, `fixtures.ts` and `tests/` and press **Run on GitHub**. The workflow runs with the learner's own config and grades the project against the framework rubric.
 
 ## Things to know
 
 - Sign-in lands on a GitHub 404 page ("This is not the web page you are looking for"): the app is private. See step 1.
 - Real-site labs need GitHub Actions enabled for repos in the organisation (Organization settings → Actions → General → "Allow all actions and reusable workflows", which is the default). Each run takes 1–3 minutes on GitHub's free runners because it installs Playwright and Chromium.
-- The runner files (`.github/workflows/lab.yml`, `lab-reporter.js`, root `playwright.config.ts`) are managed by the app: when they change in a release, the next run commits "Update the lab runner files" to the learner's repo before dispatching.
+- The runner files (`.github/workflows/lab.yml`, `lab-reporter.js`, `lab-evidence.js`, `lab-serve.js`, root `playwright.config.ts`) are managed by the app: when they change in a release, the next run commits "Update the lab runner files" to the learner's repo before dispatching.
 - Repos are **public** on purpose. GitHub Actions is free for public repos; private repos would share the organisation's 2,000 free minutes a month and run out quickly. Public repos also give learners a portfolio link.
 - The app only ever touches repos named `lab-*`. It cannot see or change `qa-interview-ready`.
 - To stop a learner, delete their `lab-<login>` repo in GitHub. To stop everything, uninstall the app from the organisation.

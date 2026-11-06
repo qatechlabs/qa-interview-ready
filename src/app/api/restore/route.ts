@@ -32,8 +32,9 @@ export async function POST(req: Request) {
   try {
     const payment = await fetchPayment(paymentId);
     if ((payment.email || "").toLowerCase() !== email) return fail;
-    if (!(await paymentGrantsAccess(payment))) return fail;
-    return grantResponse(email, payment.id);
+    const tier = await paymentGrantsAccess(payment);
+    if (!tier) return fail;
+    return grantResponse(email, payment.id, tier);
   } catch {
     return fail;
   }

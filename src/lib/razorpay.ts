@@ -1,6 +1,6 @@
 import "server-only";
 import crypto from "crypto";
-import { PRICE } from "./config";
+import { PRICE, tierForProduct, type Tier, type TierId } from "./config";
 
 const API = "https://api.razorpay.com/v1";
 
@@ -56,17 +56,27 @@ export interface RazorpayPayment {
 /** Razorpay rejects orders below 100 paise (₹1). */
 export const MIN_AMOUNT = 100;
 
-export function createOrder() {
-  if (!Number.isInteger(PRICE.amount) || PRICE.amount < MIN_AMOUNT) {
-    throw new Error(`PRICE_AMOUNT must be an integer of at least ${MIN_AMOUNT} (smallest currency unit); got ${PRICE.amount}`);
+/** Amount charged for `target` when upgrading from `from` (the difference, never below the minimum). */
+export function upgradeAmount(target: Tier, from: Tier | null) {
+  return Math.max(MIN_AMOUNT, target.amount - (from?.amount || 0));
+}
+
+/**
+ * Creates the order for a tier. An upgrade carries the payment it upgrades from in the notes,
+ * so the difference is charged and the upgrade can be verified later from the payment alone.
+ */
+export function createOrder(target: Tier, upgradeFrom?: { paymentId: string; tier: Tier }) {
+  const amount = upgradeAmount(target, upgradeFrom?.tier || null);
+  if (!Number.isInteger(amount) || amount < MIN_AMOUNT) {
+    throw new Error(`Tier amounts must be integers of at least ${MIN_AMOUNT} (smallest currency unit); got ${amount}`);
   }
   return rp<RazorpayOrder>("/orders", {
     method: "POST",
     body: JSON.stringify({
-      amount: PRICE.amount,
+      amount,
       currency: PRICE.currency,
       receipt: `qir_${Date.now()}`,
-      notes: { product: PRICE.productId },
+      notes: { product: target.productId, ...(upgradeFrom ? { upgrade_from: upgradeFrom.paymentId } : {}) },
     }),
   });
 }
@@ -91,16 +101,24 @@ export function verifyCheckoutSignature(orderId: string, paymentId: string, sign
 }
 
 /**
- * A payment grants access when it is captured, not refunded, and belongs to an order
- * for this product at (at least) the current price.
+ * The tier a payment grants: captured, not refunded, for an order of one of our products at (at least)
+ * the order's amount. An upgrade order also needs the payment it upgraded from to be valid.
  */
-export async function paymentGrantsAccess(payment: RazorpayPayment) {
-  if (payment.status !== "captured") return false;
-  if (payment.refund_status) return false;
-  if (!payment.order_id) return false;
+export async function paymentGrantsAccess(payment: RazorpayPayment, depth = 0): Promise<TierId | null> {
+  if (payment.status !== "captured") return null;
+  if (payment.refund_status) return null;
+  if (!payment.order_id) return null;
   const order = await fetchOrder(payment.order_id);
-  if (order.notes?.product !== PRICE.productId) return false;
-  return payment.amount >= order.amount;
+  const target = tierForProduct(order.notes?.product);
+  if (!target) return null;
+  if (payment.amount < order.amount) return null;
+  const from = order.notes?.upgrade_from;
+  if (from) {
+    if (depth > 3) return null;
+    const base = await paymentGrantsAccess(await fetchPayment(from), depth + 1);
+    if (!base) return null;
+  }
+  return target.id;
 }
 
 export function capturePayment(payment: RazorpayPayment) {

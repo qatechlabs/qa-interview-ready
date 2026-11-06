@@ -17,10 +17,11 @@ export async function POST(req: Request) {
     let payment = await fetchPayment(paymentId);
     if (payment.order_id !== orderId) return NextResponse.json({ error: "Payment does not match order." }, { status: 400 });
     if (payment.status === "authorized") payment = await capturePayment(payment);
-    if (!(await paymentGrantsAccess(payment))) {
+    const tier = await paymentGrantsAccess(payment);
+    if (!tier) {
       return NextResponse.json({ error: "Payment is not complete yet. Try 'Restore access' in a minute." }, { status: 402 });
     }
-    return grantResponse((payment.email || "").toLowerCase(), payment.id);
+    return grantResponse((payment.email || "").toLowerCase(), payment.id, tier);
   } catch (e) {
     console.error(e);
     return NextResponse.json({ error: "Couldn't verify the payment. Use 'Restore access' with your payment ID." }, { status: 502 });
