@@ -47,18 +47,19 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {[
-          ["🎯", "Ordered, not random", "Each level is a study path. Concepts build on each other, so you prepare the way interviewers think.", null],
-          ["⏱", "60-second answers", "A crisp spoken answer first, with a timer to rehearse, then the deep explanation and example.", null],
-          ["💻", "Real code", "Java for Selenium and REST Assured, TypeScript for Playwright, Python, SQL, YAML and more.", null],
-          ["🎤", "Mock interviews", "Timed rounds that score you, track weak topics and build your revision list automatically.", "/mock"],
-        ].map(([icon, title, text, href]) => (
+          ["🎯", "Ordered, not random", "Each level is a study path. Concepts build on each other, so you prepare the way interviewers think.", null, null],
+          ["⏱", "60-second answers", "A crisp spoken answer first, with a timer to rehearse, then the deep explanation and example.", null, null],
+          ["💻", "Real code", "Java for Selenium and REST Assured, TypeScript for Playwright, Python, SQL, YAML and more.", null, null],
+          ["🎤", "Mock interviews", "Timed rounds that score you, track weak topics and build your revision list automatically.", "/mock", "Try a round →"],
+          ["🧪", "Live coding labs", "Interview scenarios on a shop, an HR portal and a fashion store. Write the test, run it, watch it click through live.", "/labs", "Try a free lab →"],
+        ].map(([icon, title, text, href, cta]) => (
           <div key={title} className="card p-5">
             <div className="text-2xl">{icon}</div>
             <h3 className="mt-2 font-semibold">{title}</h3>
             <p className="mt-1 text-sm muted">{text}</p>
-            {href && <Link href={href} className="mt-2 inline-block text-sm font-semibold accent hover:underline">Try a round →</Link>}
+            {href && <Link href={href} className="mt-2 inline-block text-sm font-semibold accent hover:underline">{cta}</Link>}
           </div>
         ))}
       </section>
@@ -75,7 +76,7 @@ export default function Home() {
       <section className="card flex flex-col items-start gap-4 p-6 sm:flex-row sm:items-center">
         <div className="flex-1">
           <h2 className="text-xl font-bold">Unlock every level for {formatPrice()}</h2>
-          <p className="mt-1 muted">One-time payment, lifetime access, including new questions as they're added.</p>
+          <p className="mt-1 muted">One-time payment, lifetime access to every answer and all live coding labs, including new questions as they're added.</p>
         </div>
         <Link href="/pricing" className="btn btn-primary !px-6 !py-3">See what's included</Link>
       </section>

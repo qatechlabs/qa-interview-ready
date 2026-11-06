@@ -6,6 +6,7 @@ import { razorpayConfigured } from "@/lib/razorpay";
 import { FREE_PER_LEVEL, PRICE, formatPrice } from "@/lib/config";
 import { BuyButton } from "@/components/BuyButton";
 import { RestoreForm } from "@/components/RestoreForm";
+import { SCENARIOS } from "@/lab/scenarios";
 import { SignOutButton } from "@/components/SignOutButton";
 
 export const metadata = { title: "Pricing" };
@@ -38,6 +39,7 @@ export default async function PricingPage({ searchParams }: { searchParams: { we
     ["Ordered study path per level", "✓", "✓"],
     ["Flashcard mode", "Free cards only", `All ${total} cards`],
     ["Mock interview rounds", "Drawn from free questions", "Drawn from the full bank, weak-spot and per-topic rounds"],
+    ["Live coding labs", `${SCENARIOS.filter((s) => s.free).length} free labs`, `All ${SCENARIOS.length}, with Playwright + Selenium Java solutions`],
     ["Progress, bookmarks, weak-topic tracking", "✓", "✓"],
     ["New questions and levels as they're added", "—", "Included, no extra charge"],
     ["Devices", "Any", "Any: restore with your email + payment ID"],
@@ -65,6 +67,7 @@ export default async function PricingPage({ searchParams }: { searchParams: { we
               "60-second answer, explanation, example and code for each",
               "Mock interview rounds from the full bank, with weak-spot drills",
               "Flashcards for every question",
+              `All ${SCENARIOS.length} live coding labs, with Playwright and Selenium Java solutions`,
               "New questions as they're added, no extra charge",
               "One-time payment, no subscription",
             ].map((p) => <li key={p} className="flex gap-2"><span style={{ color: "var(--good)" }}>✓</span>{p}</li>)}
