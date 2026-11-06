@@ -53,7 +53,7 @@ export const LAB_APPS: LabApp[] = [
     styledAfter: "the real saucedemo.com, the public Sauce Labs demo store",
     icon: "🧪",
     base: "https://www.saucedemo.com",
-    blurb: "The screening site every automation interviewer knows: login users, product sorting, cart and checkout.",
+    blurb: "The screening site every automation interviewer knows: login users, product sorting, cart and checkout. Pure front-end, no API: UI labs only.",
     credentials: "standard_user, locked_out_user, problem_user, performance_glitch_user / secret_sauce",
     remote: true,
   },
@@ -1061,7 +1061,7 @@ export class SearchPage {
 
   // TODO: fill the username and password, click Login
 
-  // TODO: assert the URL, the "Products" title and 12 items
+  // TODO: assert the URL, the "Products" title and 6 items
 });
 
 test('locked out user sees an error', async ({ page }) => {
@@ -2214,7 +2214,7 @@ export const WORKSPACES: Scenario[] = [
   workspace("swagshop", "workspace-swagshop", "SwagShop", "Start with login and the cart; the checkout maths is where the bugs live.", readmeFor("SwagShop", "the SwagShop practice store (Saucedemo-style)", "Users: standard_user, locked_out_user, problem_user, performance_glitch_user / secret_sauce. Runs in the browser and on GitHub Actions."), true),
   workspace("peopledesk", "workspace-peopledesk", "PeopleDesk HR", "Admin login, employee CRUD with cleanup, leave validation. Show me how you keep test data isolated.", readmeFor("PeopleDesk HR", "the PeopleDesk practice portal (OrangeHRM-style)", "Login: Admin / admin123. Employee data resets when the page reloads, so each test should create what it needs.")),
   workspace("trendkart", "workspace-trendkart", "TrendKart", "Search, filters, sorting and the bag; make the suite data-driven.", readmeFor("TrendKart", "the TrendKart practice marketplace (Myntra-style)", "No login. Prices are rupees with commas, so you will want a parsePrice helper.")),
-  workspace("saucedemo", "workspace-saucedemo", "Sauce Demo", "This is the real saucedemo.com. Your config must work on CI, not only on your laptop.", readmeFor("Sauce Demo", "https://www.saucedemo.com", "Users: standard_user, locked_out_user, problem_user, performance_glitch_user / secret_sauce. data-test attributes are the stable hooks."), true),
+  workspace("saucedemo", "workspace-saucedemo", "Sauce Demo", "This is the real saucedemo.com, a pure front-end with no API behind it, so this framework is UI-only: six products, four users. Your config must work on CI, not only on your laptop.", readmeFor("Sauce Demo", "https://www.saucedemo.com", "Users: standard_user, locked_out_user, problem_user, performance_glitch_user / secret_sauce. data-test attributes are the stable hooks."), true),
   workspace("orangehrm", "workspace-orangehrm", "OrangeHRM", "This is the real OrangeHRM demo. It is slow and shared with the whole internet, so your design must cope with that. Its screens run on a REST API (/web/index.php/api/v2) that your logged-in session can call: I expect an API layer next to the page objects.", readmeFor("OrangeHRM", "https://opensource-demo.orangehrmlive.com", "Login: Admin / admin123. The demo resets regularly; use unique names (Date.now()) for anything you create. Login lives at /web/index.php/auth/login.")),
   workspace("automationexercise", "workspace-automationexercise", "AutomationExercise", "This is the real automationexercise.com: ads, modals, a UI and a JSON API. I want UI and API tests in the same framework.", readmeFor("AutomationExercise", "https://automationexercise.com", "Register your own users with unique emails and delete them afterwards. The API answers with text/html, so parse JSON from the body text.")),
 ];
