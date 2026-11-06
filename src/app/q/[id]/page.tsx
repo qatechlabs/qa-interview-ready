@@ -59,7 +59,7 @@ export default async function QuestionPage({ params }: { params: { id: string } 
           <div className="mt-6 text-center">
             <p className="text-lg font-semibold">🔒 This answer is part of full access</p>
             <p className="mx-auto mt-1 max-w-md text-sm muted">
-              Unlock the 60-second answer, explanation, example and code for every question in all five levels. One payment of {formatPrice()}, lifetime access.
+              Unlock the 60-second answer, explanation, example and code for every question in all five levels. One payment of {formatPrice()} (Prep), lifetime access.
             </p>
             <div className="mt-4 flex justify-center gap-2">
               <Link href="/pricing" className="btn btn-primary">Unlock everything</Link>

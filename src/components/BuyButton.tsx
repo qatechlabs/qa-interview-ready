@@ -19,7 +19,7 @@ function loadScript() {
   });
 }
 
-export function BuyButton({ label, configured }: { label: string; configured: boolean }) {
+export function BuyButton({ label, configured, tier, primary = true }: { label: string; configured: boolean; tier: "prep" | "pro" | "architect"; primary?: boolean }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -28,7 +28,7 @@ export function BuyButton({ label, configured }: { label: string; configured: bo
     setBusy(true);
     try {
       if (!(await loadScript())) throw new Error("Couldn't load the payment window. Check your connection and try again.");
-      const res = await fetch("/api/checkout/order", { method: "POST" });
+      const res = await fetch("/api/checkout/order", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tier }) });
       const order = await res.json();
       if (!res.ok) throw new Error(order.error || "Couldn't start checkout.");
       const rzp = new window.Razorpay({
@@ -68,7 +68,7 @@ export function BuyButton({ label, configured }: { label: string; configured: bo
 
   return (
     <div>
-      <button className="btn btn-primary w-full !py-3 text-base" onClick={buy} disabled={busy || !configured}>
+      <button className={`btn ${primary ? "btn-primary" : "btn-ghost"} w-full !py-3 text-base`} onClick={buy} disabled={busy || !configured}>
         {busy ? "Opening checkout…" : label}
       </button>
       {!configured && <p className="mt-2 text-xs muted">Payments are not configured yet on this deployment.</p>}

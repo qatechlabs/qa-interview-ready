@@ -4,6 +4,8 @@ import { getScenario, isFramework, isRemote, isWorkspace, labApp, MAIN_FILE, sta
 import type { LogEntry, RunResult } from "@/lib/lab/runtime";
 import { markLabPassed } from "@/lib/lab/progress";
 import { SITE } from "@/lib/config";
+import type { ReportModel, ReportTest } from "@/lib/lab/report";
+import { appendLiveLog, downloadBlob, loadPrefs, modelFromLog, openReportWindow, savePrefs, showReport, type RunPrefs } from "@/lib/lab/runReport";
 
 interface SolutionView {
   playwright: string;
@@ -38,6 +40,14 @@ const SPEEDS = [
 ];
 
 const draftKey = (id: string) => `qir_lab_draft_${id}`;
+/** A report tab that never got a report (error or stop) is closed again so it doesn't linger. */
+const closeUnfilledReport = (w: Window | null) => {
+  try {
+    if (w && !w.closed && w.document.getElementById("log")) w.close();
+  } catch {
+    /* ignore */
+  }
+};
 const sortPaths = (files: Files) =>
   Object.keys(files).sort((a, b) => {
     const da = a.includes("/") ? 0 : 1;
@@ -70,6 +80,10 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
   const [solTab, setSolTab] = useState<"playwright" | "selenium" | null>(null);
   const [commit, setCommit] = useState<CommitState>({ status: "idle" });
   const [runUrl, setRunUrl] = useState<string>("");
+  const [prefs, setPrefs] = useState<RunPrefs>({ openReport: true, downloadEvidence: true });
+  const [lastReport, setLastReport] = useState<ReportModel | null>(null);
+  const [evidenceBusy, setEvidenceBusy] = useState(false);
+  const reportWin = useRef<Window | null>(null);
   const lastCommitted = useRef<string>("");
   const frame = useRef<HTMLIFrameElement>(null);
   const signal = useRef({ aborted: false });
@@ -110,6 +124,40 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
   useEffect(() => {
     logEnd.current?.scrollIntoView({ block: "nearest" });
   }, [log]);
+
+  useEffect(() => {
+    setPrefs(loadPrefs());
+  }, []);
+  const updatePrefs = (next: Partial<RunPrefs>) =>
+    setPrefs((p) => {
+      const merged = { ...p, ...next };
+      savePrefs(merged);
+      return merged;
+    });
+
+  /** Builds the Word evidence document and downloads it. */
+  const downloadEvidence = useCallback(async (model: ReportModel) => {
+    setEvidenceBusy(true);
+    try {
+      const { buildEvidenceDocx, evidenceFileName } = await import("@/lib/lab/evidence");
+      downloadBlob(await buildEvidenceDocx(model), evidenceFileName(model));
+    } catch (e) {
+      console.error("evidence document", e);
+    } finally {
+      setEvidenceBusy(false);
+    }
+  }, []);
+
+  /** After every run: fill the report tab and download the evidence, as the learner prefers. */
+  const deliver = useCallback(
+    (model: ReportModel) => {
+      setLastReport(model);
+      if (prefs.openReport) showReport(reportWin.current, model);
+      reportWin.current = null;
+      if (prefs.downloadEvidence) void downloadEvidence(model);
+    },
+    [prefs.openReport, prefs.downloadEvidence, downloadEvidence],
+  );
 
   // keep the address bar in sync while the learner clicks around manually
   useEffect(() => {
@@ -207,7 +255,7 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
             : `${passedTests}/${result.tests.length} tests passed · ${(result.durationMs / 1000).toFixed(1)}s`,
       });
       if (pass) markLabPassed(id);
-      return { pass, passedTests };
+      return { pass, passedTests, rows };
     },
     [files, scenario, id],
   );
@@ -215,6 +263,9 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
   /** Real-site labs: commit, dispatch the workflow in the learner's repo, poll until it completes. */
   const runRemote = useCallback(async () => {
     if (running || !github?.user) return;
+    // opened synchronously on the click so the browser allows the tab; filled when the run finishes
+    reportWin.current = prefs.openReport ? openReportWindow(`${scenario.title} · GitHub Actions`) : null;
+    const startedAt = new Date().toISOString();
     setRunning(true);
     setChecks(null);
     setVerdict(null);
@@ -223,6 +274,7 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
     const push = (e: LogEntry) => {
       entries.push(e);
       setLog([...entries]);
+      appendLiveLog(reportWin.current, e);
     };
     setLog([]);
     signal.current = { aborted: false };
@@ -249,7 +301,15 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
         await sleep(last ? 6000 : 4000);
         if (mySignal.aborted) break;
         const st = await fetch(`/api/labs/run?sha=${d.sha}&since=${encodeURIComponent(d.dispatchedAt)}`, { cache: "no-store" });
-        const r = (await st.json().catch(() => ({}))) as { error?: string; status?: string; runUrl?: string; conclusion?: string | null; tests?: { name: string; ok: boolean; error?: string; durationMs: number }[]; assertions?: { passed: number; failed: number; matchers: string[] }; durationMs?: number };
+        const r = (await st.json().catch(() => ({}))) as {
+          error?: string;
+          status?: string;
+          runUrl?: string;
+          conclusion?: string | null;
+          tests?: { name: string; ok: boolean; error?: string; durationMs: number; steps?: { title: string; ok: boolean; durationMs?: number; error?: string; screenshot?: string }[] }[];
+          assertions?: { passed: number; failed: number; matchers: string[] };
+          durationMs?: number;
+        };
         if (!st.ok) {
           push({ kind: "error", text: r.error || `Couldn't read the run (${st.status})` });
           return;
@@ -265,6 +325,7 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
         push({ kind: "info", text: `Workflow ${r.conclusion || "finished"} after ${secs}s` });
         for (const t of r.tests || []) {
           push({ kind: "test", text: t.name });
+          for (const s of t.steps || []) push({ kind: s.ok ? "step" : "fail", text: s.error ? `${s.title} — ${s.error.split("\n")[0]}` : s.title, ms: s.durationMs });
           push(t.ok ? { kind: "pass", text: `passed`, ms: t.durationMs } : { kind: "fail", text: t.error || "failed", ms: t.durationMs });
         }
         if (r.error) push({ kind: "error", text: r.error });
@@ -284,7 +345,32 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
           durationMs: r.durationMs || Date.now() - started,
         };
         if (!tests.length && !r.error) push({ kind: "error", text: "No tests were found. Test files must be named *.spec.ts." });
-        finish(result, push, { lab: null, url: "", doc: null });
+        const { rows } = finish(result, push, { lab: null, url: "", doc: null });
+        const reportTests: ReportTest[] = (r.tests || []).map((t) => ({
+          name: t.name,
+          status: t.ok ? "passed" : "failed",
+          durationMs: t.durationMs,
+          error: t.error,
+          steps: (t.steps || []).map((s) => ({ title: s.title, status: s.ok ? "passed" : "failed", durationMs: s.durationMs, error: s.error, screenshot: s.screenshot })),
+        }));
+        deliver({
+          scenario: scenario.title,
+          scenarioId: id,
+          app: app.name,
+          mode: "github",
+          startedAt,
+          durationMs: result.durationMs,
+          tests: reportTests,
+          assertions: result.assertions,
+          checks: rows,
+          verdict: rows.every((x) => x.ok) ? "pass" : "fail",
+          learner: github.user.login,
+          baseURL: app.remote ? app.base : SITE.url + app.base,
+          runUrl: r.runUrl,
+          repoUrl: d.repoUrl,
+          commitUrl: d.commitUrl,
+          log: entries,
+        });
         return;
       }
       if (mySignal.aborted) push({ kind: "info", text: "Stopped watching. The run continues on GitHub; open it from the link above." });
@@ -293,25 +379,39 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
       push({ kind: "error", text: e instanceof Error ? e.message : String(e) });
     } finally {
       setRunning(false);
+      closeUnfilledReport(reportWin.current);
+      reportWin.current = null;
     }
-  }, [running, github, files, id, finish]);
+  }, [running, github, files, id, finish, prefs.openReport, scenario.title, app, deliver]);
 
   const run = useCallback(async () => {
     if (running) return;
     if (remote) return runRemote();
     const f = frame.current;
     if (!f) return;
+    reportWin.current = prefs.openReport ? openReportWindow(scenario.title) : null;
+    const startedAt = new Date().toISOString();
     setRunning(true);
     setChecks(null);
     setVerdict(null);
     const entries: LogEntry[] = [];
+    // event-based screenshots: one after every action and assertion, keyed by log index
+    const shots = new Map<number, Promise<string | null>>();
     const push = (e: LogEntry) => {
       entries.push(e);
       setLog([...entries]);
+      appendLiveLog(reportWin.current, e);
+    };
+    const afterStep = (e: LogEntry) => {
+      if (shots.size >= 80) return Promise.resolve();
+      const i = entries.lastIndexOf(e);
+      const p = snapshotFrame(f);
+      if (i >= 0) shots.set(i, p);
+      return p;
     };
     setLog([]);
     signal.current = { aborted: false };
-    const { runProject } = await import("@/lib/lab/runtime");
+    const [{ runProject }, { snapshotFrame }] = await Promise.all([import("@/lib/lab/runtime"), import("@/lib/lab/snapshot")]);
     let result: RunResult;
     try {
       result = await runProject(files, {
@@ -320,17 +420,22 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
         slowMo: speed,
         timeout: 5000,
         onLog: push,
+        afterStep,
         signal: signal.current,
         beforeEachTest: freshPage,
       });
     } catch (e) {
       push({ kind: "error", text: e instanceof Error ? e.message : String(e) });
       setRunning(false);
+      closeUnfilledReport(reportWin.current);
+      reportWin.current = null;
       return;
     }
     if (signal.current.aborted) {
       push({ kind: "info", text: "Run stopped." });
       setRunning(false);
+      closeUnfilledReport(reportWin.current);
+      reportWin.current = null;
       return;
     }
 
@@ -342,10 +447,28 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
     } catch {
       /* ignore */
     }
-    const { pass, passedTests } = finish(result, push, { lab, url: pageUrl, doc: f.contentDocument });
+    const { pass, passedTests, rows } = finish(result, push, { lab, url: pageUrl, doc: f.contentDocument });
     setRunning(false);
     void commitToGitHub(files, `${passedTests}/${result.tests.length} tests passed${pass ? ", scenario passed" : ""}`);
-  }, [running, remote, runRemote, files, app.base, speed, freshPage, finish, commitToGitHub]);
+    const resolved = new Map<number, string | null>();
+    await Promise.all(Array.from(shots.entries()).map(async ([i, p]) => resolved.set(i, await p.catch(() => null))));
+    deliver({
+      scenario: scenario.title,
+      scenarioId: id,
+      app: app.name,
+      mode: "browser",
+      startedAt,
+      durationMs: result.durationMs,
+      tests: modelFromLog(entries, resolved, result),
+      assertions: result.assertions,
+      checks: rows,
+      verdict: pass ? "pass" : "fail",
+      learner: github?.user?.login,
+      baseURL: SITE.url + app.base,
+      repoUrl: github?.user ? `https://github.com/${github.org}/lab-${github.user.login.toLowerCase()}` : undefined,
+      log: entries,
+    });
+  }, [running, remote, runRemote, files, app, speed, freshPage, finish, commitToGitHub, prefs.openReport, scenario.title, id, github, deliver]);
 
   const stop = () => {
     signal.current.aborted = true;
@@ -597,7 +720,15 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
                 <code className="inline-code">test.extend</code> fixtures. Saved in this browser. Ctrl/⌘ + Enter runs.
               </p>
             )}
-            <button onClick={download} className="btn btn-ghost !px-2.5 !py-1 text-xs">⬇ Download as Playwright project</button>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <label className="flex items-center gap-1" title="Opens a tab on Run that fills with the Allure-style report when the run finishes">
+                <input type="checkbox" checked={prefs.openReport} onChange={(e) => updatePrefs({ openReport: e.target.checked })} /> Report in a new tab
+              </label>
+              <label className="flex items-center gap-1" title="Downloads a Word document with every step and screenshot after the run">
+                <input type="checkbox" checked={prefs.downloadEvidence} onChange={(e) => updatePrefs({ downloadEvidence: e.target.checked })} /> Download evidence (.docx)
+              </label>
+              <button onClick={download} className="btn btn-ghost !px-2.5 !py-1 text-xs">⬇ Download as Playwright project</button>
+            </div>
           </div>
           {github?.configured && (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border px-3 py-2 text-xs" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
@@ -700,8 +831,20 @@ export function LabWorkbench({ id, solution, github }: { id: string; solution: S
           <section className="card p-4" aria-live="polite">
             <div className="mb-2 flex items-center justify-between">
               <h2 className="text-sm font-semibold">Test output</h2>
-              {verdict === "pass" && <span className="chip" style={{ color: "var(--good)" }}>✓ Scenario passed</span>}
-              {verdict === "fail" && <span className="chip" style={{ color: "#e11d48" }}>✗ Not yet</span>}
+              <div className="flex flex-wrap items-center gap-1.5">
+                {lastReport && !running && (
+                  <>
+                    <button onClick={() => showReport(null, lastReport)} className="btn btn-ghost !px-2 !py-0.5 text-xs" title="Allure-style run report with every step and screenshot">
+                      📊 Open report ↗
+                    </button>
+                    <button onClick={() => downloadEvidence(lastReport)} className="btn btn-ghost !px-2 !py-0.5 text-xs" disabled={evidenceBusy} title="Word document with the event-based screenshots as evidence">
+                      {evidenceBusy ? "Preparing…" : "⬇ Evidence (.docx)"}
+                    </button>
+                  </>
+                )}
+                {verdict === "pass" && <span className="chip" style={{ color: "var(--good)" }}>✓ Scenario passed</span>}
+                {verdict === "fail" && <span className="chip" style={{ color: "#e11d48" }}>✗ Not yet</span>}
+              </div>
             </div>
             <div className="max-h-56 overflow-auto rounded-lg p-2 font-mono text-[12px] leading-relaxed" style={{ background: "var(--surface-2)" }}>
               {!log.length && (

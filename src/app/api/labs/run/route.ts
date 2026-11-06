@@ -4,7 +4,7 @@ import { getGitHubUser } from "@/lib/github/user";
 import { validateFiles } from "@/lib/github/labrepo";
 import { dispatchLabRun, labRunStatus } from "@/lib/github/labrun";
 import { getScenario, isRemote, isWorkspace, labApp } from "@/lab/scenarios";
-import { hasPremium } from "@/lib/access";
+import { hasTier } from "@/lib/access";
 import { SITE } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
@@ -32,13 +32,13 @@ export async function POST(req: Request) {
   const scenario = typeof body.scenarioId === "string" ? getScenario(body.scenarioId) : undefined;
   if (!scenario) return NextResponse.json({ error: "Unknown scenario." }, { status: 400 });
   if (!isRemote(scenario) && !isWorkspace(scenario)) return NextResponse.json({ error: "This lab runs in the browser." }, { status: 400 });
-  if (!scenario.free && !(await hasPremium())) return NextResponse.json({ error: "This lab needs full access." }, { status: 403 });
+  if (!scenario.free && !(await hasTier(isWorkspace(scenario) ? "architect" : "pro"))) return NextResponse.json({ error: `This lab needs the ${isWorkspace(scenario) ? "Architect" : "Pro"} tier.` }, { status: 403 });
   try {
     const files = validateFiles(body.files);
     const site = SITE.url.replace(/\/$/, "");
     const message = `lab(${scenario.id}): run on GitHub Actions\n\n${scenario.title} · ${site}/labs/${scenario.id}`;
     const app = labApp(scenario.app);
-    const result = await dispatchLabRun(user, site, scenario.id, files, app.remote ? app.base : site + app.base, message);
+    const result = await dispatchLabRun(user, site, scenario.id, files, app.remote ? app.base : site + app.base.replace(/\/$/, ""), message, app.remote ? "" : app.id);
     return NextResponse.json(result);
   } catch (e) {
     return fail(e, "start the run");

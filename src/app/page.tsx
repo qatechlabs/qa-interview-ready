@@ -75,8 +75,8 @@ export default function Home() {
 
       <section className="card flex flex-col items-start gap-4 p-6 sm:flex-row sm:items-center">
         <div className="flex-1">
-          <h2 className="text-xl font-bold">Unlock every level for {formatPrice()}</h2>
-          <p className="mt-1 muted">One-time payment, lifetime access to every answer and all live coding labs, including new questions as they're added.</p>
+          <h2 className="text-xl font-bold">Unlock every level from {formatPrice()}</h2>
+          <p className="mt-1 muted">One-time payment, lifetime access. Prep gives every answer; Pro adds the live coding labs; Architect adds building a framework from scratch.</p>
         </div>
         <Link href="/pricing" className="btn btn-primary !px-6 !py-3">See what's included</Link>
       </section>

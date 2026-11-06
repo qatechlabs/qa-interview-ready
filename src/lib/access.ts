@@ -1,6 +1,7 @@
 import "server-only";
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
+import { isTierId, tierAtLeast, type TierId } from "./config";
 
 export const ACCESS_COOKIE = "qir_access";
 const MAX_AGE = 60 * 60 * 24 * 365 * 5; // 5 years
@@ -24,10 +25,11 @@ function secret() {
 export interface AccessClaims {
   email: string;
   paymentId: string;
+  tier: TierId;
 }
 
 export async function signAccess(claims: AccessClaims) {
-  return new SignJWT({ email: claims.email, pid: claims.paymentId })
+  return new SignJWT({ email: claims.email, pid: claims.paymentId, tier: claims.tier })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(`${MAX_AGE}s`)
@@ -39,7 +41,8 @@ export async function verifyAccess(token: string | undefined): Promise<AccessCla
   try {
     const { payload } = await jwtVerify(token, secret(), { algorithms: ["HS256"] });
     if (typeof payload.email !== "string" || typeof payload.pid !== "string") return null;
-    return { email: payload.email, paymentId: payload.pid };
+    // cookies issued before tiers existed belong to buyers of the old all-in-one plan
+    return { email: payload.email, paymentId: payload.pid, tier: isTierId(payload.tier) ? payload.tier : "architect" };
   } catch {
     return null;
   }
@@ -50,8 +53,15 @@ export async function getAccess() {
   return verifyAccess(cookies().get(ACCESS_COOKIE)?.value);
 }
 
+/** Any paid tier (questions are unlocked from Prep up). */
 export async function hasPremium() {
   return (await getAccess()) !== null;
+}
+
+/** Whether the current visitor's tier is at least `need`. */
+export async function hasTier(need: TierId) {
+  const a = await getAccess();
+  return !!a && tierAtLeast(a.tier, need);
 }
 
 export function accessCookieOptions() {

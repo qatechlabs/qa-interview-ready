@@ -12,6 +12,7 @@
     "prebuild": "npm run content"
   },
   "dependencies": {
+    "docx": "^9.15.2",
     "jose": "^6.2.15",
     "next": "^14.2.35",
     "react": "^18",

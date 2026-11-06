@@ -10,7 +10,7 @@ export default function Page() {
       updated="6 November 2026"
       body={`${SITE.name} is operated by ${SITE.businessName}. By using the site you agree to these terms.
 
-**What you get.** Free visitors can read the free questions of every level. Buying full access (currently ${formatPrice()}, one-time) unlocks all questions on the site for personal use, with no expiry.
+**What you get.** Free visitors can read the free questions of every level. Buying a tier (Prep, Pro or Architect; from ${formatPrice()}, one-time) unlocks the content of that tier, as listed on the pricing page, for personal use, with no expiry. Upgrades are charged as the difference between tiers.
 
 **Personal licence.** Access is for one person. Don't share, resell, scrape or republish the paid content.
 

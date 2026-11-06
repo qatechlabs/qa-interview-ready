@@ -20,6 +20,11 @@ export interface RunOptions {
   timeout: number;
   onLog: (e: LogEntry) => void;
   signal: { aborted: boolean };
+  /**
+   * Called after every logged step/assertion; the next action waits for it to resolve, so the
+   * workbench can capture the page as evidence before anything else changes.
+   */
+  afterStep?: (e: LogEntry) => Promise<unknown>;
 }
 
 export interface RunResult {
@@ -255,9 +260,16 @@ function attrQuery(attrs: string[], value: TextMatcher, exact = false): Query {
 // ---------- runtime ----------
 
 export function createRuntime(opts: RunOptions) {
-  const { frame, onLog, signal } = opts;
+  const { frame, signal } = opts;
   const stats = { passed: 0, failed: 0, matchers: [] as string[] };
   let navCounter = 0;
+  let pending: Promise<unknown> = Promise.resolve();
+  const onLog = (e: LogEntry) => {
+    opts.onLog(e);
+    if (opts.afterStep && (e.kind === "step" || e.kind === "pass" || e.kind === "fail")) pending = opts.afterStep(e).catch(() => undefined);
+  };
+  /** Waits for the evidence capture of the previous step, so each screenshot shows its own step. */
+  const settle = () => pending;
 
   const check = () => {
     if (signal.aborted) throw new AbortedError();
@@ -452,6 +464,7 @@ export function createRuntime(opts: RunOptions) {
     }
 
     private async act(name: string, cond: (e: Element) => string | null, fn: (el: Element) => void | Promise<void>, label?: string) {
+      await settle();
       const started = Date.now();
       const el = await this._one(name, cond);
       el.scrollIntoView({ block: "center", inline: "nearest" });
@@ -689,6 +702,7 @@ export function createRuntime(opts: RunOptions) {
   // ----- Page -----
   const page = {
     async goto(url: string) {
+      await settle();
       check();
       const target = resolveUrl(url);
       const started = Date.now();
@@ -856,6 +870,7 @@ export function createRuntime(opts: RunOptions) {
       if (actual instanceof Locator) {
         const loc = actual;
         const retry = async (name: string, arg: string, test: () => { pass: boolean; got: string } | undefined) => {
+          await settle();
           check();
           let last = { pass: false, got: "element not found" };
           const deadline = Date.now() + timeout;
@@ -920,6 +935,7 @@ export function createRuntime(opts: RunOptions) {
 
       if (actual === page) {
         const retry = async (name: string, arg: string, test: () => { pass: boolean; got: string }) => {
+          await settle();
           const deadline = Date.now() + timeout;
           let last = test();
           while (last.pass === negate && Date.now() < deadline) {

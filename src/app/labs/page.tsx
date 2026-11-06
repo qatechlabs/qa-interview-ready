@@ -1,8 +1,8 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import { ALL_SCENARIOS, LAB_APPS, isFramework, scenariosFor, SCENARIOS, WORKSPACES } from "@/lab/scenarios";
-import { hasPremium } from "@/lib/access";
-import { formatPrice } from "@/lib/config";
+import { getAccess } from "@/lib/access";
+import { formatPrice, tier, tierAtLeast } from "@/lib/config";
 import { LabPassedBadge, LabPassedCount } from "@/components/lab/LabPassedBadge";
 import { githubConfig } from "@/lib/github/app";
 import { getGitHubUser } from "@/lib/github/user";
@@ -14,7 +14,9 @@ export const metadata: Metadata = {
 };
 
 export default async function LabsIndex({ searchParams }: { searchParams?: { github?: string } }) {
-  const premium = await hasPremium();
+  const access = await getAccess();
+  const premium = !!access && tierAtLeast(access.tier, "pro");
+  const architect = !!access && tierAtLeast(access.tier, "architect");
   const ghCfg = githubConfig();
   const ghUser = ghCfg ? await getGitHubUser() : null;
   const ghError = searchParams?.github === "failed" || searchParams?.github === "state" ? "GitHub sign-in didn't complete. Try again." : null;
@@ -46,7 +48,7 @@ export default async function LabsIndex({ searchParams }: { searchParams?: { git
         </div>
         {!premium && (
           <p className="mt-4 text-sm muted">
-            {freeCount} labs are free. Full access ({formatPrice()}, one time) unlocks all {SCENARIOS.length} scenarios and {WORKSPACES.length} framework workspaces, plus reference solutions in Playwright and Selenium Java.{" "}
+            {freeCount} labs are free. <b>Pro</b> ({formatPrice(tier("pro").amount)}, one time) unlocks all {SCENARIOS.length} scenarios with reference solutions in Playwright and Selenium Java; <b>Architect</b> ({formatPrice(tier("architect").amount)}) adds all {WORKSPACES.length} framework workspaces.{access ? " You have " + tier(access.tier).name + "; upgrade for the difference." : ""}{" "}
             <Link href="/pricing" className="font-semibold accent hover:underline">See pricing</Link>
           </p>
         )}
@@ -86,15 +88,15 @@ export default async function LabsIndex({ searchParams }: { searchParams?: { git
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {WORKSPACES.map((s) => {
             const app = LAB_APPS.find((a) => a.id === s.app)!;
-            const locked = !s.free && !premium;
+            const locked = !s.free && !architect;
             return (
               <Link key={s.id} href={`/labs/${s.id}`} className="card flex flex-col p-4 transition hover:-translate-y-0.5 hover:shadow-lg">
                 <div className="mb-2 flex flex-wrap gap-1.5">
                   <span className="chip">{s.level}</span>
                   <span className="chip">~{s.minutes} min</span>
                   {app.remote ? <span className="chip">☁ Real site · GitHub Actions</span> : <span className="chip">Browser + GitHub Actions</span>}
-                  {s.free && !premium && <span className="chip" style={{ color: "var(--good)" }}>Free</span>}
-                  {locked && <span className="chip">🔒 Full access</span>}
+                  {s.free && !architect && <span className="chip" style={{ color: "var(--good)" }}>Free</span>}
+                  {locked && <span className="chip">🔒 Architect</span>}
                   <LabPassedBadge id={s.id} />
                 </div>
                 <h3 className="font-semibold">
@@ -142,7 +144,7 @@ export default async function LabsIndex({ searchParams }: { searchParams?: { git
                       {isFramework(s) && <span className="chip" style={{ color: "var(--accent)" }}>Framework · multi-file</span>}
                       {app.remote && <span className="chip">☁ GitHub Actions</span>}
                       {s.free && !premium && <span className="chip" style={{ color: "var(--good)" }}>Free</span>}
-                      {locked && <span className="chip">🔒 Full access</span>}
+                      {locked && <span className="chip">🔒 Pro</span>}
                       <LabPassedBadge id={s.id} />
                     </div>
                     <h3 className="font-semibold">{s.title}</h3>

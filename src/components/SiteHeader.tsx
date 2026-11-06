@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { SITE } from "@/lib/config";
-import { hasPremium } from "@/lib/access";
+import { getAccess } from "@/lib/access";
+import { tier } from "@/lib/config";
 
 export async function SiteHeader() {
-  const premium = await hasPremium();
+  const access = await getAccess();
   const nav = [
     { href: "/#levels", label: "Levels" },
     { href: "/practice", label: "Flashcards" },
@@ -27,8 +28,8 @@ export async function SiteHeader() {
           ))}
         </nav>
         <div className="ml-auto sm:ml-0">
-          {premium ? (
-            <span className="chip ml-1 whitespace-nowrap" style={{ color: "var(--good)" }}>✓ Pro</span>
+          {access ? (
+            <Link href="/pricing" className="chip ml-1 whitespace-nowrap" style={{ color: "var(--good)" }} title={access.tier === "architect" ? "You have everything" : "Upgrade for the difference"}>✓ {tier(access.tier).name}</Link>
           ) : (
             <Link href="/pricing" className="btn btn-primary ml-1 whitespace-nowrap !px-3 !py-1.5">Unlock all</Link>
           )}

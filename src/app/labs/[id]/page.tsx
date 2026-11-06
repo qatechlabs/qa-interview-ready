@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { ALL_SCENARIOS, getScenario, isWorkspace, labApp, SCENARIOS, workspaceFor } from "@/lab/scenarios";
+import { getScenario, isWorkspace, labApp, SCENARIOS, workspaceFor, WORKSPACES } from "@/lab/scenarios";
 import { SOLUTIONS } from "@/lab/solutions";
-import { hasPremium } from "@/lib/access";
-import { formatPrice } from "@/lib/config";
+import { hasTier } from "@/lib/access";
+import { formatPrice, tier } from "@/lib/config";
 import { LabWorkbench } from "@/components/lab/LabWorkbench";
 import { githubConfig } from "@/lib/github/app";
 import { getGitHubUser } from "@/lib/github/user";
@@ -23,8 +23,8 @@ export default async function LabPage({ params }: { params: { id: string } }) {
   const s = getScenario(params.id);
   if (!s) notFound();
   const app = labApp(s.app);
-  const premium = await hasPremium();
-  const locked = !s.free && !premium;
+  const need = isWorkspace(s) ? tier("architect") : tier("pro");
+  const locked = !s.free && !(await hasTier(need.id));
   const ghCfg = githubConfig();
   const ghUser = ghCfg ? await getGitHubUser() : null;
   const github = { configured: !!ghCfg, org: ghCfg?.org || "", user: ghUser ? { login: ghUser.login, name: ghUser.name, avatar: ghUser.avatar } : null };
@@ -76,13 +76,15 @@ export default async function LabPage({ params }: { params: { id: string } }) {
             </ol>
           </section>
           <div className="card p-6 text-center">
-            <p className="text-lg font-semibold">🔒 This lab is part of full access</p>
+            <p className="text-lg font-semibold">🔒 This {isWorkspace(s) ? "framework workspace" : "lab"} is part of {need.name}</p>
             <p className="mx-auto mt-1 max-w-md text-sm muted">
-              Unlock the live editor, the scenario checks and the reference solutions in Playwright and Selenium Java for all {ALL_SCENARIOS.length} labs, plus every
-              interview answer. One payment of {formatPrice()}, lifetime access.
+              {isWorkspace(s)
+                ? `Architect unlocks the live editor, the production-grade framework review and the reference frameworks for all ${WORKSPACES.length} workspaces, on top of every lab and interview answer.`
+                : `Pro unlocks the live editor, the scenario checks and the reference solutions in Playwright and Selenium Java for all ${SCENARIOS.length} labs, plus every interview answer.`}{" "}
+              One payment of {formatPrice(need.amount)}, lifetime access. Already on a lower tier? Upgrade for the difference.
             </p>
             <div className="mt-4 flex flex-wrap justify-center gap-2">
-              <Link href="/pricing" className="btn btn-primary">Unlock everything</Link>
+              <Link href="/pricing" className="btn btn-primary">Get {need.name}</Link>
               <Link href="/labs" className="btn btn-ghost">Try a free lab</Link>
             </div>
           </div>

@@ -6,12 +6,27 @@ import { readZipEntry } from "./unzip";
 
 export const WORKFLOW_FILE = "lab.yml";
 
+export interface RunStep {
+  title: string;
+  ok: boolean;
+  durationMs?: number;
+  error?: string;
+  /** JPEG data URL from the trace's screencast, taken right after the step */
+  screenshot?: string;
+}
+
 export interface RunTest {
   name: string;
   ok: boolean;
   error?: string;
   durationMs: number;
+  /** path of the trace.zip on the runner (key into evidence.json) */
+  trace?: string;
+  steps?: RunStep[];
 }
+
+/** Base64 budget for screenshots in one status response (Vercel caps responses at ~4.5 MB). */
+const SCREENSHOT_BUDGET = 3_000_000;
 
 export interface RunStatus {
   status: "pending" | "queued" | "in_progress" | "completed";
@@ -41,7 +56,7 @@ async function withToken<T>(fn: (token: string) => Promise<T>): Promise<T> {
  * Commits the lab, makes sure the workflow file exists, and dispatches a run of it.
  * Returns the commit (head) sha the run will report as head_sha.
  */
-export async function dispatchLabRun(u: GitHubUser, siteUrl: string, scenarioId: string, files: Record<string, string>, baseURL: string, message: string) {
+export async function dispatchLabRun(u: GitHubUser, siteUrl: string, scenarioId: string, files: Record<string, string>, baseURL: string, message: string, app = "") {
   const cfg = githubConfig();
   if (!cfg) throw new GitHubError("GitHub App is not configured", 503);
   const commit = await commitLab(u, siteUrl, scenarioId, files, message);
@@ -72,7 +87,7 @@ export async function dispatchLabRun(u: GitHubUser, siteUrl: string, scenarioId:
     const dispatchedAt = new Date().toISOString();
     await gh(`/repos/${cfg.org}/${name}/actions/workflows/${WORKFLOW_FILE}/dispatches`, token, {
       method: "POST",
-      json: { ref: repo.default_branch || "main", inputs: { lab: `labs/${scenarioId}`, baseURL } },
+      json: { ref: repo.default_branch || "main", inputs: { lab: `labs/${scenarioId}`, baseURL, app } },
     });
     return { sha: head, commitUrl: commit.url, commitUnchanged: commit.unchanged, repoUrl: repo.html_url, dispatchedAt, actionsUrl: `${repo.html_url}/actions/workflows/${WORKFLOW_FILE}` };
   });
@@ -122,6 +137,36 @@ export async function labRunStatus(u: GitHubUser, sha: string, since: string): P
       return out;
     }
     Object.assign(out, parseResults(json.toString("utf8")));
+    const evidence = readZipEntry(zip, "evidence.json");
+    if (evidence && out.tests) {
+      try {
+        const ev = JSON.parse(evidence.toString("utf8")) as Record<string, { steps?: { title: string; ok: boolean; durationMs?: number; error?: string; screenshot?: string }[] }>;
+        let budget = SCREENSHOT_BUDGET;
+        const cache = new Map<string, string | undefined>();
+        for (const t of out.tests) {
+          const e = t.trace ? ev[t.trace] : undefined;
+          if (!e?.steps) continue;
+          t.steps = e.steps.map((st) => {
+            let screenshot: string | undefined;
+            if (st.screenshot) {
+              if (cache.has(st.screenshot)) screenshot = cache.get(st.screenshot);
+              else {
+                const img = readZipEntry(zip, st.screenshot);
+                if (img && img.length * 1.37 <= budget) {
+                  screenshot = `data:image/jpeg;base64,${img.toString("base64")}`;
+                  budget -= screenshot.length;
+                }
+                cache.set(st.screenshot, screenshot);
+              }
+            }
+            return { title: st.title, ok: !!st.ok, durationMs: st.durationMs, error: st.error, screenshot };
+          });
+        }
+      } catch {
+        /* evidence is optional */
+      }
+    }
+    for (const t of out.tests || []) delete t.trace;
     const asserts = readZipEntry(zip, "assertions.json");
     if (asserts) {
       try {
@@ -142,7 +187,7 @@ interface PwStep {
 }
 interface PwSuite {
   title: string;
-  specs?: { title: string; ok: boolean; tests?: { results?: { status: string; duration?: number; error?: { message?: string }; errors?: { message?: string }[]; steps?: PwStep[] }[] }[] }[];
+  specs?: { title: string; ok: boolean; tests?: { results?: { status: string; duration?: number; error?: { message?: string }; errors?: { message?: string }[]; steps?: PwStep[]; attachments?: { name?: string; path?: string }[] }[] }[] }[];
   suites?: PwSuite[];
 }
 
@@ -177,7 +222,8 @@ export function parseResults(text: string): Pick<RunStatus, "tests" | "assertion
       const results = (spec.tests || []).flatMap((t) => t.results || []);
       const last = results[results.length - 1];
       const err = last?.error?.message || last?.errors?.[0]?.message;
-      tests.push({ name, ok: !!spec.ok, error: spec.ok ? undefined : stripAnsi(err || last?.status || "failed").split("\n").slice(0, 6).join("\n"), durationMs: results.reduce((a, r) => a + (r.duration || 0), 0) });
+      const trace = last?.attachments?.find((a) => a.name === "trace" && a.path)?.path;
+      tests.push({ name, ok: !!spec.ok, error: spec.ok ? undefined : stripAnsi(err || last?.status || "failed").split("\n").slice(0, 6).join("\n"), durationMs: results.reduce((a, r) => a + (r.duration || 0), 0), trace });
       for (const r of results) walkSteps(r.steps);
     }
     for (const s of suite.suites || []) walk(s, s.title && !/\.(spec|test)\.[tj]s$/.test(s.title) ? [...prefix, s.title] : prefix);
