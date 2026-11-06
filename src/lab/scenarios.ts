@@ -1631,7 +1631,7 @@ test('seeded cart checks out in the UI', async ({ page }) => {
     title: "API: employee CRUD with validation",
     level: "Mid",
     minutes: 20,
-    free: false,
+    free: true,
     story:
       "\"Cover the employee record end to end at the API: create one, read it back through search, update it, delete it, and prove it is gone. Include the validation failure for a missing last name, and check the field-level details the API returns.\"",
     criteria: [
@@ -1897,6 +1897,183 @@ test('seeded bag checks out in the UI', async ({ page }) => {
       { label: "The order was verified through GET /api/orders", test: (c) => codeHas(c, /\/api\/orders/) && c.result.ok },
     ],
   },
+  // ---------------- Production-grade end-to-end journeys (UI + API) ----------------
+  {
+    id: "swagshop-e2e-purchase-journey",
+    app: "swagshop",
+    title: "End-to-end: purchase journey verified through UI and API",
+    level: "Senior",
+    minutes: 30,
+    free: true,
+    story:
+      "\"This is the release test for the store. Prove the catalogue through the API, buy through the UI exactly like a customer (quantities, a coupon, checkout), check every number against the API's own prices, then cancel the order through the API and confirm the UI shows it. One test, clear steps, no hard-coded totals.\"",
+    criteria: [
+      "API: GET /api/products returns 12 products; read the prices of Fleece Zip Jacket and Classic Cotton Tee from it (no hard-coded prices).",
+      "UI: log in as standard_user, add both products, set the tee quantity to 2 in the cart, apply SAVE10 and assert the coupon message.",
+      "UI: fill the checkout info and on the overview assert item total, discount (10%), tax (8% after discount) and total computed from the API prices (round to 2 decimals).",
+      "UI: Finish and assert the confirmation. API: GET /api/orders shows one order with that total and coupon SAVE10; POST /api/orders/:id/cancel. UI: /orders/:id shows status cancelled.",
+    ],
+    hints: [
+      "Use test.step for each phase (catalogue, shopping, checkout, order) so the report reads like a test case.",
+      "page.request shares the browser session, so the order you placed in the UI is what GET /api/orders returns.",
+      "The quantity control in the cart is getByLabel('Quantity for Classic Cotton Tee'); the coupon box is getByLabel('Coupon code') plus the Apply button; the message has data-test=\"coupon-message\".",
+      "Money helper: const money = (t) => Number(t.match(/\\$([0-9.]+)/)?.[1]); labels such as 'Coupon SAVE10: -$8.20' contain other digits, so take the $ amount. Compare with toBeCloseTo(expected, 2).",
+      "After clicking Continue, wait for the overview (expect(page).toHaveURL(/checkout-step-two/)) before reading prices: the app saves through the API.",
+    ],
+    starter:
+      header +
+      `const money = (t: string | null) => Number((t || '').match(/\\$([0-9.]+)/)?.[1] || 0); // the $ amount in the label
+const r2 = (n: number) => Math.round(n * 100) / 100;
+
+test('purchase journey: catalogue, cart, checkout, order', async ({ page }) => {
+  const api = page.request;
+
+  await test.step('catalogue is healthy (API)', async () => {
+    // TODO: GET /api/products, assert 12, read the two prices
+  });
+
+  await test.step('shop as a customer (UI)', async () => {
+    // TODO: login, add both products, tee qty 2, apply SAVE10
+  });
+
+  await test.step('checkout maths (UI vs API prices)', async () => {
+    // TODO
+  });
+
+  await test.step('order placed, then cancelled (API + UI)', async () => {
+    // TODO
+  });
+});
+`,
+    minAssertions: 8,
+    skills: ["End-to-end", "UI + API", "test.step", "Computed assertions", "Order lifecycle"],
+    checks: [
+      { label: "Prices were read from the API, not hard-coded", test: (c) => codeHas(c, /\/api\/products/) && !codeHas(c, /49\.99|15\.99/) },
+      { label: "The journey is structured with test.step", test: (c) => codeHas(c, /test\.step\(/) && c.result.ok },
+      { label: "The tee quantity was changed and SAVE10 applied in the UI", test: (c) => codeHas(c, /Quantity for|item-quantity-select/) && codeHas(c, /SAVE10/) },
+      { label: "The checkout maths were asserted (discount, tax and total)", test: (c) => usesAny(c, "toBeCloseTo", "toBe", "toEqual") && c.result.assertions.passed >= 8 },
+      { label: "An order with SAVE10 was placed and then cancelled", test: (c) => c.lab?.order?.coupon === "SAVE10" && c.lab.order.status === "cancelled" && codeHas(c, /\/api\/orders/) },
+      { label: "The cancelled status was verified in the UI", test: (c) => codeHas(c, /order-status/) && codeHas(c, /cancelled/) },
+    ],
+  },
+  {
+    id: "peopledesk-e2e-hire-to-leave",
+    app: "peopledesk",
+    title: "End-to-end: hire to leave approval across roles and layers",
+    level: "Senior",
+    minutes: 35,
+    free: false,
+    story:
+      "\"HR's critical path: a new hire is created, logs in, applies for leave, punches in, and a manager approves. Automate it across both roles and both layers: seed the hire through the API, drive the employee through the UI, verify with the API, approve as Admin in the UI, verify the balance through the API, and leave no data behind.\"",
+    criteria: [
+      "API (page.request, Admin): create an employee with a unique last name, jobTitle QA Engineer, department Quality Engineering. Keep the id.",
+      "UI: log in as that employee (first.last / Welcome@1); My Info shows the name and id. Apply for Sick Leave 2026-12-01 to 2026-12-02 and assert Pending Approval; punch in on the Time page and assert the status.",
+      "API (same session): GET /api/leave has 1 request with days 2 and status Pending Approval; GET /api/attendance has an open punch.",
+      "UI: log out, log in as Admin, approve the request from the Leave list and assert Scheduled. API: GET /api/leave/balance?employeeId=<id> shows Sick Leave used 2, available 8. Clean-up in afterEach: DELETE the employee and assert 404.",
+    ],
+    hints: [
+      "page.request shares the browser cookies: after the UI login as the employee, API calls run as the employee; after the Admin UI login they run as Admin. That is what makes one session carry the whole story.",
+      "The employee's username is firstName.lastName in lower case; the password for every employee is Welcome@1.",
+      "Admin sees Approve / Reject buttons on Pending Approval rows: page.getByTestId('leave-row').filter({ hasText: lastName }).getByRole('button', { name: 'Approve' }).",
+      "Log out through the user menu: getByTestId('user-menu') then the Logout menu item.",
+      "Keep the created id in a file-level variable so afterEach can delete it even when a step fails.",
+    ],
+    starter:
+      header +
+      `const lastName = 'Hire' + Date.now();
+let employeeId = '';
+
+test.beforeEach(async ({ page }) => {
+  // TODO: Admin login + POST /api/employees with page.request; keep employeeId
+});
+
+test.afterEach(async ({ page }) => {
+  // TODO: DELETE /api/employees/:id (log in as Admin first if needed) and assert 404
+});
+
+test('hire to leave approval', async ({ page }) => {
+  await test.step('employee logs in and applies (UI)', async () => {
+    // TODO
+  });
+
+  await test.step('request and punch exist (API)', async () => {
+    // TODO
+  });
+
+  await test.step('admin approves (UI) and the balance moves (API)', async () => {
+    // TODO
+  });
+});
+`,
+    minAssertions: 8,
+    skills: ["End-to-end", "UI + API", "Role switching", "Data seeding and clean-up", "Workflow"],
+    checks: [
+      { label: "The hire was seeded through the API and cleaned up in afterEach", test: (c) => codeHas(c, /\.post\([^)]*employees/) && codeHas(c, /afterEach/) && codeHas(c, /\.delete\(/) },
+      { label: "The employee used the UI (login, leave, punch)", test: (c) => codeHas(c, /Welcome@1/) && codeHas(c, /Punch In/) && codeHas(c, /Sick Leave/) },
+      { label: "The request and the punch were verified through the API", test: (c) => codeHas(c, /\/api\/leave/) && codeHas(c, /\/api\/attendance/) },
+      { label: "Admin approved in the UI and the balance was checked through the API", test: (c) => codeHas(c, /Approve/) && codeHas(c, /balance/) && codeHas(c, /\b8\b/) },
+      { label: "Every step passed", test: (c) => c.result.ok && c.result.assertions.passed >= 8 },
+      { label: "The 404 after clean-up was asserted", test: (c) => codeHas(c, /404/) },
+    ],
+  },
+  {
+    id: "trendkart-e2e-member-journey",
+    app: "trendkart",
+    title: "End-to-end: new member journey from sign-up to cancellation",
+    level: "Senior",
+    minutes: 35,
+    free: false,
+    story:
+      "\"Our highest-value flow is a new member who signs up, saves things, buys with a member coupon and later cancels. Automate it end to end: sign up in the UI, seed the wishlist through the API, move an item to the bag and add another in the UI, apply NEWUSER, pay to a saved address created through the API, then verify the order through the API and cancel it in the UI.\"",
+    criteria: [
+      "UI: create an account with a unique email (Create an account link, then Name, Mobile, Email, Password). API: GET /api/me returns that email.",
+      "API: POST /api/wishlist for productId 106. UI: on the wishlist choose size S and Move to bag; open product 104, pick size M, add to bag; in the bag set its quantity to 2 and apply NEWUSER, asserting the coupon message.",
+      "API: GET /api/bag totals must equal what the bag page shows (count 3, Total Amount). POST /api/addresses for a saved address.",
+      "UI: PLACE ORDER, choose the saved address and Cash on delivery, CONFIRM ORDER and assert the confirmation. API: GET /api/orders has that order with status confirmed and the same total. UI: open the order from My Orders, Cancel order, and assert the status is cancelled; API agrees.",
+    ],
+    hints: [
+      "Registration lives at /register (or the Create an account link on /login); after it the app sends members to their account page.",
+      "Wishlist rows have a size select: getByLabel('Size for Women Floral Print Kurta') then getByTestId('move-to-bag').",
+      "Bag quantity: getByLabel('Quantity for Men Printed Round Neck T-shirt').selectOption('2'); coupon: getByLabel('Coupon code') + Apply, message in getByTestId('coupon-message').",
+      "Compare money as numbers: const inr = (t) => Number(t.replace(/[^0-9]/g, '')); the API totals are plain integers in rupees.",
+      "On checkout the saved address is a radio inside getByTestId('saved-address'); payment radios are labelled UPI, Credit / Debit card, Cash on delivery.",
+    ],
+    starter:
+      header +
+      `const inr = (t: string | null) => Number((t || '').replace(/[^0-9]/g, ''));
+const email = 'member' + Date.now() + '@example.com';
+
+test('new member: sign up, wishlist, bag, coupon, order, cancel', async ({ page }) => {
+  const api = page.request;
+
+  await test.step('sign up (UI) and verify the session (API)', async () => {
+    // TODO
+  });
+
+  await test.step('wishlist (API) to bag (UI) with a member coupon', async () => {
+    // TODO
+  });
+
+  await test.step('bag totals agree between UI and API', async () => {
+    // TODO
+  });
+
+  await test.step('order to a saved address, verify, cancel', async () => {
+    // TODO
+  });
+});
+`,
+    minAssertions: 8,
+    skills: ["End-to-end", "UI + API", "Member features", "Price reconciliation", "Order lifecycle"],
+    checks: [
+      { label: "An account was created in the UI and verified through GET /api/me", test: (c) => codeHas(c, /Create an account|\/register/) && codeHas(c, /\/api\/me/) },
+      { label: "The wishlist was seeded through the API and moved to the bag in the UI", test: (c) => codeHas(c, /\/api\/wishlist/) && codeHas(c, /Move to bag|move-to-bag/) },
+      { label: "NEWUSER was applied and the totals reconciled with the API", test: (c) => codeHas(c, /NEWUSER/) && codeHas(c, /\/api\/bag/) && usesAny(c, "toBe", "toEqual", "toBeCloseTo") },
+      { label: "The order was placed to a saved address and confirmed via the API", test: (c) => codeHas(c, /\/api\/addresses/) && codeHas(c, /saved-address/) && codeHas(c, /\/api\/orders/) },
+      { label: "The order was cancelled in the UI and the status verified", test: (c) => codeHas(c, /Cancel order|cancel-order/) && codeHas(c, /cancelled/) && c.lab?.order?.status === "cancelled" },
+      { label: "Every step passed", test: (c) => c.result.ok && c.result.assertions.passed >= 8 },
+    ],
+  },
 ];
 
 // ---------------- Framework workspaces: build everything from scratch ----------------
@@ -1920,14 +2097,27 @@ const FRAMEWORK_RUBRIC: Check[] = [
   { label: "README explains how to install and run the suite", test: (c) => /playwright\s+(test|install)|npm\s+(test|run)/i.test(c.files["README.md"] || "") },
 ];
 
+/** True when a test in `src` destructures a fixture other than `request` (a page or a page object), so it drives the UI. */
+const usesUiFixtures = (src: string) => Array.from(src.matchAll(/\(\s*\{([^}]*)\}\s*\)\s*=>/g)).some((m: RegExpMatchArray) => m[1].split(",").map((x: string) => x.trim().split(":")[0].trim()).some((name: string) => name !== "" && name !== "request"));
+
+/** Extra rows for applications that expose a REST API: the framework must cover both layers. */
+const API_RUBRIC: Check[] = [
+  { label: "An API client module wraps the REST calls (api/, clients/, services/ or utils/api)", test: (c) => Object.keys(c.files).some((f) => /^(api|clients|services)\/|^utils\/api/.test(f)) },
+  { label: "At least one spec covers the API (request fixture or page.request) and at least one test drives the UI", test: (c) => specFiles(c).some(([, s]) => /\brequest\b/.test(stripComments(s))) && specFiles(c).some(([, s]) => usesUiFixtures(stripComments(s))) },
+  { label: "A spec combines both layers: API set-up or verification inside a UI test", test: (c) => specFiles(c).some(([, s]) => /page\.request|\brequest\b/.test(stripComments(s)) && /\b(page|app|loggedIn|inventory|cart|pim|leave|bag|search)\b/.test(stripComments(s)) && /expect\(/.test(s)) },
+];
+const APPS_WITH_API: LabAppId[] = ["swagshop", "peopledesk", "trendkart", "automationexercise"];
+const frameworkRubric = (app: LabAppId) => (APPS_WITH_API.includes(app) ? [...FRAMEWORK_RUBRIC, ...API_RUBRIC] : FRAMEWORK_RUBRIC);
+
 const workspaceBrief = (appName: string, extra: string) =>
-  `"Here is an empty folder and ${appName}. Set up the automation framework you would put in front of a client: Playwright config, page objects, fixtures, test data, a couple of production-grade tests, and a README. Treat it like a real repo, not an exercise. ${extra}"`;
+  `"Here is an empty folder and ${appName}. Set up the automation framework you would put in front of a client: Playwright config, page objects, an API client where the app has an API, fixtures, test data, production-grade UI and API tests, and a README. Treat it like a real repo, not an exercise. ${extra}"`;
 
 const WORKSPACE_CRITERIA = [
   "playwright.config.ts you write yourself: testDir, baseURL from an environment variable with a default, retries, reporter, trace/screenshot on failure.",
   "pages/ with at least two page objects; fixtures.ts that extends test (for example a logged-in page or a ready page object).",
   "tests/ with at least two spec files and four tests in total, using only fixtures and page objects, grouped with test.describe or tagged @smoke/@regression.",
   "data/ or utils/ for test data and helpers; a README that says how to install and run.",
+  "Where the application has a REST API (the practice apps, AutomationExercise): an API client module, at least one API spec, and a spec that uses the API to set up or verify a UI journey. UI-only frameworks do not pass.",
   "Everything green: in the browser for the practice apps, and on GitHub Actions with your own config for every app.",
 ];
 
@@ -1937,6 +2127,7 @@ const WORKSPACE_HINTS = [
   "fixtures.ts: export const test = base.extend<{ app: AppPages }>({ app: async ({ page }, use) => { … await use(…) } }); export { expect } from '@playwright/test'. Specs import { test, expect } from '../fixtures'.",
   "A spec should read like a test case: await app.login.loginAs(users.standard); await expect(app.inventory.title).toHaveText('Products'). Keep every locator inside a page object.",
   "Run on GitHub uses your config: the workflow runs npx playwright test --config <your folder>/playwright.config.ts. The in-browser runner ignores the config file but checks it.",
+  "API layer: api/<app>.api.ts wraps request (login, products, cart...) and a fixture exposes it: api: async ({ request }, use) => use(new ShopApi(request)). Use page.request inside UI tests when the API must share the browser session.",
 ];
 
 const workspace = (app: LabAppId, id: string, name: string, extra: string, readme: string, free = false): Scenario => ({
@@ -1956,7 +2147,7 @@ const workspace = (app: LabAppId, id: string, name: string, extra: string, readm
   },
   minAssertions: 4,
   skills: ["Framework design", "Config", "Page Objects", "Fixtures", "Test data", "CI"],
-  checks: FRAMEWORK_RUBRIC,
+  checks: frameworkRubric(app),
 });
 
 const readmeFor = (name: string, site: string, notes: string) => `# ${name} automation framework
