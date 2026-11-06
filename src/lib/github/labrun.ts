@@ -1,6 +1,6 @@
 import "server-only";
 import { API, gh, GitHubError, githubConfig, installationToken, resetInstallationToken } from "./app";
-import { commitLab, commitTree, labRepoName, seedFiles, type Repo } from "./labrepo";
+import { commitLab, commitTree, labRepoName, RUNNER_FILES, seedFiles, type Repo } from "./labrepo";
 import type { GitHubUser } from "./user";
 import { readZipEntry } from "./unzip";
 
@@ -49,13 +49,22 @@ export async function dispatchLabRun(u: GitHubUser, siteUrl: string, scenarioId:
   return withToken(async (token) => {
     const repo = await gh<Repo>(`/repos/${cfg.org}/${name}`, token);
     let head = commit.sha;
-    // Repos created before the workflow existed get it on their first remote run.
-    try {
-      await gh(`/repos/${cfg.org}/${name}/contents/.github/workflows/${WORKFLOW_FILE}`, token);
-    } catch (e) {
-      if (!(e instanceof GitHubError) || e.status !== 404) throw e;
-      const wf = seedFiles(u, siteUrl)[`.github/workflows/${WORKFLOW_FILE}`];
-      const r = await commitTree(token, cfg.org, repo, u, { [`.github/workflows/${WORKFLOW_FILE}`]: wf }, "", "Add the lab run workflow");
+    // Repos created before the runner files existed (or changed) get the current ones before the run.
+    const seed = seedFiles(u, siteUrl);
+    const missing: Record<string, string> = {};
+    for (const f of RUNNER_FILES) {
+      try {
+        const cur = await gh<{ content?: string; encoding?: string }>(`/repos/${cfg.org}/${name}/contents/${f}`, token);
+        const text = cur.content && cur.encoding === "base64" ? Buffer.from(cur.content.replace(/\n/g, ""), "base64").toString("utf8") : "";
+        // the config is ours, but a learner may have edited it: only replace it when it predates the reporter
+        if (f === "playwright.config.ts" ? !text.includes("lab-reporter") : text !== seed[f] && f === "lab-reporter.js") missing[f] = seed[f];
+      } catch (e) {
+        if (!(e instanceof GitHubError) || e.status !== 404) throw e;
+        missing[f] = seed[f];
+      }
+    }
+    if (Object.keys(missing).length) {
+      const r = await commitTree(token, cfg.org, repo, u, missing, "", "Update the lab runner files");
       head = r.sha;
     }
     const dispatchedAt = new Date().toISOString();
@@ -111,6 +120,15 @@ export async function labRunStatus(u: GitHubUser, sha: string, since: string): P
       return out;
     }
     Object.assign(out, parseResults(json.toString("utf8")));
+    const asserts = readZipEntry(zip, "assertions.json");
+    if (asserts) {
+      try {
+        const a = JSON.parse(asserts.toString("utf8")) as { passed?: number; failed?: number; matchers?: string[] };
+        if (typeof a.passed === "number") out.assertions = { passed: a.passed, failed: a.failed || 0, matchers: Array.isArray(a.matchers) ? a.matchers.filter((m) => typeof m === "string") : [] };
+      } catch {
+        /* keep what the report gave */
+      }
+    }
     return out;
   });
 }

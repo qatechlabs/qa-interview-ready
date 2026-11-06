@@ -29,7 +29,7 @@ Go to https://github.com/organizations/qatechlabs/settings/apps/new and fill in:
 
 **Organization permissions**: none. **Account permissions**: none.
 
-**Where can this GitHub App be installed?** → "Only on this account".
+**Where can this GitHub App be installed?** → **Any account**. This makes the app public, which is required: a private app can only be authorised by members of the organisation, and every other GitHub user (every learner) gets a 404 from GitHub on sign-in. Public only means anyone can *authorise* it; it is still installed only where you install it (step 3). If the app was created as private, fix it under the app's **Advanced** page → "Make this GitHub App public".
 
 Click **Create GitHub App**.
 
@@ -73,6 +73,7 @@ Open https://interview.qatechlabs.com/api/github/status first. It lists any miss
 
 ## Things to know
 
+- Sign-in lands on a GitHub 404 page ("This is not the web page you are looking for"): the app is private. See step 1.
 - Real-site labs need GitHub Actions enabled for repos in the organisation (Organization settings → Actions → General → "Allow all actions and reusable workflows", which is the default). Each run takes 1–3 minutes on GitHub's free runners because it installs Playwright and Chromium.
 - Repos are **public** on purpose. GitHub Actions is free for public repos; private repos would share the organisation's 2,000 free minutes a month and run out quickly. Public repos also give learners a portfolio link.
 - The app only ever touches repos named `lab-*`. It cannot see or change `qa-interview-ready`.
