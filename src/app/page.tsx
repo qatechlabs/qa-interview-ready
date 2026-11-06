@@ -31,7 +31,7 @@ export default function Home() {
           {LEVELS.map((l) => {
             const n = questionsForLevel(l.id).length;
             return (
-              <Link key={l.id} href={`/levels/${l.id}`} className="card group flex flex-col p-5 transition hover:-translate-y-0.5 hover:shadow-lg">
+              <Link key={l.id} href={`/levels/${l.id}`} className="card card-tilt group flex flex-col p-5">
                 <div className="flex items-baseline justify-between">
                   <h3 className="text-lg font-semibold">{l.name}</h3>
                   <span className="text-sm muted">{l.years}</span>
