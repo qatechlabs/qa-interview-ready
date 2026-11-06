@@ -166,7 +166,7 @@ ${swagLogin}
 
   await expect(page).toHaveURL(/inventory/);
   await expect(page.getByTestId('title')).toHaveText('Products');
-  await expect(page.getByTestId('inventory-item')).toHaveCount(6);
+  await expect(page.getByTestId('inventory-item')).toHaveCount(12);
 });
 `,
     selenium: javaClass(
@@ -232,7 +232,7 @@ ${swagLogin}
   const prices = texts.map((t) => Number(t.replace('$', '')));
   const sorted = [...prices].sort((a, b) => a - b);
 
-  expect(prices).toHaveLength(6);
+  expect(prices).toHaveLength(12);
   expect(prices).toEqual(sorted);
 });
 `,
@@ -607,7 +607,7 @@ ${hrLogin}
   await page.getByRole('link', { name: 'PIM' }).click();
 
   const vikram = page.getByTestId('employee-row').filter({ hasText: 'Vikram' });
-  await expect(page.getByTestId('employee-row')).toHaveCount(6);
+  await expect(page.getByTestId('employee-row')).toHaveCount(14);
 
   await page.getByRole('button', { name: 'Delete Vikram Singh' }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
@@ -619,7 +619,7 @@ ${hrLogin}
   await page.getByRole('dialog').getByRole('button', { name: 'Yes, Delete' }).click();
   await expect(page.getByRole('status')).toContainText('Successfully Deleted');
   await expect(vikram).toHaveCount(0);
-  await expect(page.getByTestId('records-found')).toHaveText('(5) Records Found');
+  await expect(page.getByTestId('records-found')).toHaveText('(13) Records Found');
 });
 `,
     selenium: javaClass(
@@ -638,7 +638,7 @@ ${javaHrLogin}
         driver.findElement(By.cssSelector("[aria-label='Delete Vikram Singh']")).click();
         driver.findElement(By.xpath("//button[text()='Yes, Delete']")).click();
         wait.until(ExpectedConditions.invisibilityOfElementLocated(vikram));
-        Assert.assertEquals(driver.findElement(By.cssSelector("[data-test=records-found]")).getText(), "(5) Records Found");
+        Assert.assertEquals(driver.findElement(By.cssSelector("[data-test=records-found]")).getText(), "(13) Records Found");
     }`,
     ),
     notes: [
@@ -880,7 +880,7 @@ test('badge shows the number of items in the cart', async ({ inventory }) => {
 test('products sort by price low to high', async ({ inventory }) => {
   await inventory.sortBy('lohi');
   const prices = await inventory.prices();
-  expect(prices).toHaveLength(6);
+  expect(prices).toHaveLength(12);
   expect(prices).toEqual([...prices].sort((a, b) => a - b));
 });
 `,
@@ -1278,7 +1278,7 @@ test('results sort by price low to high', async ({ page }) => {
 export const SEARCHES: SearchCase[] = [
   { query: 'shirt', expectedCount: 5, mustContain: 'Shirt' },
   { query: 'jeans', expectedCount: 2, mustContain: 'Jeans' },
-  { query: 'kurta', expectedCount: 2, mustContain: 'Kurta' },
+  { query: 'kurta', expectedCount: 3, mustContain: 'Kurta' },
 ];
 `,
       "helpers/money.ts": `/** "₹1,199" → 1199 */
@@ -1334,7 +1334,7 @@ public class SearchCases {
         return new Object[][] {
             { "shirt", 5, "Shirt" },
             { "jeans", 2, "Jeans" },
-            { "kurta", 2, "Kurta" },
+            { "kurta", 3, "Kurta" },
         };
     }
 }
@@ -1456,7 +1456,7 @@ public class SearchTest {
 
   await expect(page).toHaveURL(/inventory\\.html/);
   await expect(page.getByTestId('title')).toHaveText('Products');
-  await expect(page.getByTestId('inventory-item')).toHaveCount(6);
+  await expect(page.getByTestId('inventory-item')).toHaveCount(12);
 });
 
 test('locked out user sees an error', async ({ page }) => {
@@ -1518,7 +1518,7 @@ test('two items added show in the badge and the cart', async ({ inventory, page 
 test('sorting low to high orders prices ascending', async ({ inventory }) => {
   await inventory.sortBy('lohi');
   const prices = await inventory.prices();
-  expect(prices).toHaveLength(6);
+  expect(prices).toHaveLength(12);
   expect(prices).toEqual([...prices].sort((a, b) => a - b));
 });
 `,
@@ -2273,7 +2273,7 @@ test.describe('Login @smoke', () => {
   test('standard user lands on the products page', async ({ app }) => {
     await app.login.login(users.standard.username, users.standard.password);
     await expect(app.inventory.title).toHaveText('Products');
-    await expect(app.inventory.items).toHaveCount(6);
+    await expect(app.inventory.items).toHaveCount(12);
   });
 
   test('locked out user is told why', async ({ app }) => {
@@ -2300,7 +2300,7 @@ test.describe('Shopping @regression', () => {
   test('sorting low to high orders prices ascending', async ({ loggedIn: app }) => {
     await app.inventory.sortBy('lohi');
     const prices = await app.inventory.prices();
-    expect(prices).toHaveLength(6);
+    expect(prices).toHaveLength(12);
     expect(prices).toEqual([...prices].sort((a, b) => a - b));
   });
 });
@@ -2479,7 +2479,7 @@ test.describe('PIM @regression', () => {
       "data/searches.ts": `export const SEARCHES = [
   { query: 'shirt', expectedCount: 5, mustContain: 'Shirt' },
   { query: 'jeans', expectedCount: 2, mustContain: 'Jeans' },
-  { query: 'kurta', expectedCount: 2, mustContain: 'Kurta' },
+  { query: 'kurta', expectedCount: 3, mustContain: 'Kurta' },
 ] as const;
 `,
       "utils/money.ts": `/** "₹1,199" → 1199 */
@@ -2707,7 +2707,7 @@ test.describe('Login @smoke', () => {
   test('standard user lands on the products page', async ({ app }) => {
     await app.login.login(users.standard.username, users.standard.password);
     await expect(app.inventory.title).toHaveText('Products');
-    await expect(app.inventory.items).toHaveCount(6);
+    await expect(app.inventory.items).toHaveCount(12);
   });
 
   test('locked out user is told why', async ({ app }) => {

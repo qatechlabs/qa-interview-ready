@@ -61,6 +61,15 @@
   .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#282c3f;color:#fff;padding:10px 16px;border-radius:6px;font-size:14px;z-index:9}
   .empty{text-align:center;padding:40px;color:#7e818c}
   @media (max-width:600px){.layout{display:block}.filters{width:auto;border-right:none;padding-right:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));column-gap:12px;margin-bottom:12px}.filters h3{grid-column:1/-1;margin:8px 0 2px}}
+  .dim{color:#7e818c;font-size:13px}
+  .auth{max-width:380px;margin:30px auto;background:#fff;border:1px solid #eaeaec;border-radius:8px;padding:20px}
+  .auth label,.checkout label{display:block;font-size:13px;color:#535766;margin-bottom:10px}
+  .auth input,.checkout input,.checkout select{display:block;width:100%;font:inherit;padding:9px 10px;border:1px solid #d4d5d9;border-radius:4px;margin-top:4px}
+  .checkout .two{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+  .checkout .addr{display:flex;gap:8px;align-items:center;font-size:13px;padding:8px;border:1px solid #eaeaec;border-radius:4px;margin-bottom:8px}
+  .checkout .pay label{display:inline-flex;gap:6px;margin-right:16px}
+  .badge{display:inline-block;border-radius:999px;padding:2px 10px;font-size:12px;font-weight:600;background:#e8f8f3;color:#03a685}.badge.cancelled{background:#fde8e8;color:#9b1c1c}
+  code{background:#f5f5f6;padding:1px 4px;border-radius:4px;font-size:12px}
 </style>
 </head>
 <body>
@@ -68,32 +77,13 @@
 <script>
 (function () {
   "use strict";
-  var NS = "lab:trendkart:";
-  var P = [
-    { id: 101, brand: "Roadway", name: "Men Slim Fit Casual Shirt", cat: "men", type: "shirt", mrp: 1499, price: 749, rating: 4.2, icon: "👔", oos: ["XL"] },
-    { id: 102, brand: "Urbanline", name: "Men Checked Cotton Shirt", cat: "men", type: "shirt", mrp: 1999, price: 1199, rating: 4.4, icon: "👔", oos: [] },
-    { id: 103, brand: "Nordic Thread", name: "Men Linen Formal Shirt", cat: "men", type: "shirt", mrp: 2599, price: 1819, rating: 4.1, icon: "👔", oos: ["S"] },
-    { id: 104, brand: "Roadway", name: "Men Printed Round Neck T-shirt", cat: "men", type: "tshirt", mrp: 799, price: 399, rating: 3.9, icon: "👕", oos: [] },
-    { id: 105, brand: "Urbanline", name: "Men Slim Fit Jeans", cat: "men", type: "jeans", mrp: 2499, price: 1374, rating: 4.3, icon: "👖", oos: ["M"] },
-    { id: 106, brand: "Kalakari", name: "Women Floral Print Kurta", cat: "women", type: "kurta", mrp: 1899, price: 949, rating: 4.5, icon: "👗", oos: [] },
-    { id: 107, brand: "Nordic Thread", name: "Women Oversized Shirt", cat: "women", type: "shirt", mrp: 1599, price: 959, rating: 4.0, icon: "👚", oos: ["L"] },
-    { id: 108, brand: "Kalakari", name: "Women Cotton Straight Kurta", cat: "women", type: "kurta", mrp: 1299, price: 779, rating: 4.2, icon: "👗", oos: [] },
-    { id: 109, brand: "Urbanline", name: "Women High-Rise Jeans", cat: "women", type: "jeans", mrp: 2299, price: 1379, rating: 4.1, icon: "👖", oos: [] },
-    { id: 110, brand: "Roadway", name: "Women Striped Shirt", cat: "women", type: "shirt", mrp: 1199, price: 599, rating: 3.8, icon: "👚", oos: [] },
-    { id: 111, brand: "Stride", name: "Men Running Shoes", cat: "men", type: "shoes", mrp: 3999, price: 1999, rating: 4.6, icon: "👟", oos: [] },
-    { id: 112, brand: "Stride", name: "Women Training Shoes", cat: "women", type: "shoes", mrp: 3499, price: 2449, rating: 4.3, icon: "👟", oos: ["S"] }
-  ];
-  var SIZES = ["S", "M", "L", "XL"];
-  var COUPONS = { TRENDY10: { pct: 10, min: 0 }, FLAT300: { flat: 300, min: 1499 } };
-  var PRICE_BANDS = [["0-999", "₹0 to ₹999", 0, 999], ["1000-1999", "₹1000 to ₹1999", 1000, 1999], ["2000-4999", "₹2000 to ₹4999", 2000, 4999]];
-
-  function get(k, d) { try { var v = sessionStorage.getItem(NS + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } }
-  function set(k, v) { try { sessionStorage.setItem(NS + k, JSON.stringify(v)); } catch (e) {} }
+  var API = (window.LAB_API_BASE || "") + "/api/sandbox/trendkart";
+  var app = document.getElementById("app");
+  var S = { ready: false, user: null, bag: { items: [], coupon: null, couponLabel: null, totals: { mrp: 0, discount: 0, coupon: 0, delivery: 0, total: 0, count: 0 } }, list: null, listKey: "", pdp: null, wishlist: [], addresses: [], orders: [], order: null, lastOrder: null };
+  var ui = { loadingKey: null, size: null, sizeError: false, toast: null, couponMsg: null, authError: "", checkoutError: "", moveSize: {}, flash: "" };
+  var toastTimer;
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
   function inr(n) { return "₹" + Math.round(n).toLocaleString("en-IN"); }
-  function off(p) { return Math.round((1 - p.price / p.mrp) * 100); }
-  function byId(id) { return P.filter(function (p) { return p.id === +id; })[0]; }
-
   function parse() {
     var h = location.hash.replace(/^#/, "") || "/";
     var i = h.indexOf("?");
@@ -104,128 +94,119 @@
   }
   function qs(q) { var s = Object.keys(q).filter(function (k) { return q[k]; }).map(function (k) { return encodeURIComponent(k) + "=" + encodeURIComponent(q[k]); }).join("&"); return s ? "?" + s : ""; }
   function go(p) { location.hash = p; }
-
-  var app = document.getElementById("app");
-  var ui = { loadingKey: null, loadedKey: null, size: null, sizeError: false, toast: null, couponMsg: null };
-  var toastTimer;
-
-  function bag() { return get("bag", []); }
-  function wishlist() { return get("wishlist", []); }
-
+  function api(method, path, body) {
+    return fetch(API + path, { method: method, credentials: "include", headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) { return r.text().then(function (t) { var d = {}; try { d = t ? JSON.parse(t) : {}; } catch (e) {} return { ok: r.ok, status: r.status, data: d }; }); });
+  }
+  function fail(r, fb) { return r.data && r.data.error ? r.data.error.message : fb; }
   window.__lab = {
-    get bag() { return bag(); },
-    get wishlist() { return wishlist(); },
-    get coupon() { return get("coupon", null); },
-    get totals() { return totals(); },
-    reset: function () { Object.keys(sessionStorage).forEach(function (k) { if (k.indexOf(NS) === 0) sessionStorage.removeItem(k); }); }
+    get bag() { return S.bag.items.map(function (i) { return { id: i.productId, size: i.size, qty: i.qty, lineId: i.lineId }; }); },
+    get wishlist() { return S.wishlist.map(function (p) { return p.id; }); },
+    get coupon() { return S.bag.coupon; },
+    get totals() { return S.bag.totals; },
+    get user() { return S.user; },
+    get lastOrder() { return S.lastOrder; },
+    get orders() { return S.orders; },
+    get ready() { return S.ready; },
+    reset: function () { return api("POST", "/reset").then(function () { S.user = null; S.bag = { items: [], coupon: null, couponLabel: null, totals: { mrp: 0, discount: 0, coupon: 0, delivery: 0, total: 0, count: 0 } }; S.wishlist = []; S.orders = []; S.lastOrder = null; S.listKey = ""; location.hash = "#/"; render(); }); }
   };
-
   function toast(t) { ui.toast = t; clearTimeout(toastTimer); toastTimer = setTimeout(function () { ui.toast = null; render(); }, 2500); }
-
+  function loadSession() {
+    return api("GET", "/me").then(function (r) { S.user = r.ok ? r.data.user : null; })
+      .then(function () { return api("GET", "/bag"); }).then(function (r) { if (r.ok) S.bag = r.data; })
+      .then(function () { return api("GET", "/wishlist"); }).then(function (r) { if (r.ok) S.wishlist = r.data.items; })
+      .then(function () { S.ready = true; });
+  }
+  function loadList(q) {
+    var key = JSON.stringify(q);
+    if (S.listKey === key && S.list) return Promise.resolve();
+    S.list = null; ui.loadingKey = key; render();
+    var started = Date.now();
+    return api("GET", "/products" + qs({ q: q.q, brand: q.brand, price: q.price, gender: q.gender, type: q.type, size: q.size, sort: q.sort === "recommended" ? "" : q.sort, limit: 50 })).then(function (r) {
+      var wait = Math.max(0, 900 - (Date.now() - started)); // the marketplace shows a spinner while results load
+      return new Promise(function (res) { setTimeout(res, wait); }).then(function () {
+        if (JSON.stringify(parse().q) !== key) return;
+        if (r.ok) { S.list = r.data; S.listKey = key; }
+        ui.loadingKey = null;
+      });
+    });
+  }
+  function load() {
+    var r = parse(), p = Promise.resolve();
+    if (r.path === "/products") p = loadList(r.q);
+    else if (r.path.indexOf("/p/") === 0) p = api("GET", "/products/" + encodeURIComponent(r.path.slice(3))).then(function (x) { S.pdp = x.ok ? x.data : null; });
+    else if (r.path === "/bag") p = api("GET", "/bag").then(function (x) { if (x.ok) S.bag = x.data; });
+    else if (r.path === "/wishlist") p = api("GET", "/wishlist").then(function (x) { if (x.ok) S.wishlist = x.data.items; });
+    else if (r.path === "/checkout") p = api("GET", "/bag").then(function (x) { if (x.ok) S.bag = x.data; }).then(function () { if (S.user) return api("GET", "/addresses").then(function (x) { if (x.ok) S.addresses = x.data.items; }); });
+    else if (r.path === "/orders" || r.path === "/account") p = api("GET", "/orders").then(function (x) { if (x.ok) S.orders = x.data.items; }).then(function () { if (S.user) return api("GET", "/addresses").then(function (x) { if (x.ok) S.addresses = x.data.items; }); });
+    else if (r.path.indexOf("/orders/") === 0) p = api("GET", "/orders/" + encodeURIComponent(r.path.slice(8))).then(function (x) { S.order = x.ok ? x.data.order : null; });
+    return p.then(render, render);
+  }
   function header(q) {
-    var b = bag().reduce(function (s, x) { return s + x.qty; }, 0), w = wishlist().length;
+    var b = S.bag.totals.count, w = S.wishlist.length;
     return '<header><div class="logo" data-go="/" role="link" aria-label="TrendKart home">TrendKart</div>' +
       '<form id="search-form" role="search"><input id="search" name="q" type="search" placeholder="Search for products, brands and more" aria-label="Search" data-testid="search-input" value="' + esc(q || "") + '"></form>' +
-      '<div class="icons"><button data-go="/wishlist" aria-label="Wishlist" data-testid="wishlist-link">♡ Wishlist' + (w ? '<span class="count" data-testid="wishlist-count">' + w + '</span>' : '') + '</button>' +
+      '<div class="icons"><button data-go="' + (S.user ? "/account" : "/login") + '" aria-label="Profile" data-testid="profile-link">👤 ' + (S.user ? esc(S.user.name.split(" ")[0]) : "Login") + '</button>' +
+      '<button data-go="/wishlist" aria-label="Wishlist" data-testid="wishlist-link">♡ Wishlist' + (w ? '<span class="count" data-testid="wishlist-count">' + w + '</span>' : '') + '</button>' +
       '<button data-go="/bag" aria-label="Bag" data-testid="bag-link">👜 Bag' + (b ? '<span class="count" data-testid="bag-count">' + b + '</span>' : '') + '</button></div></header>' +
       (ui.toast ? '<div class="toast" role="status" data-testid="toast">' + esc(ui.toast) + '</div>' : '');
   }
-
   function homeView() {
-    var cats = [["Men", "men", "🧔"], ["Women", "women", "👩"], ["Shirts", "shirt", "👔"], ["Shoes", "shoes", "👟"]];
-    return header() + '<main><h1 style="font-size:22px">Deal of the day: up to 50% off</h1><p>Shop the latest trends from top brands.</p>' +
-      '<div class="cats">' + cats.map(function (c) { return '<div class="cat" data-go="/products?q=' + c[1] + '" data-testid="category-' + c[1] + '"><div class="e">' + c[2] + '</div>' + c[0] + '</div>'; }).join("") + '</div></main>';
+    var cats = [["Men", "men", "🧔"], ["Women", "women", "👩"], ["Shirts", "shirt", "👔"], ["Shoes", "shoes", "👟"], ["Dresses", "dress", "👗"], ["Jackets", "jacket", "🧥"]];
+    return header() + '<main><h1 style="font-size:22px">Deal of the day: up to 50% off</h1><p>Shop the latest trends from top brands. Members get 15% off with <b>NEWUSER</b>.</p>' +
+      '<div class="cats">' + cats.map(function (c) { return '<div class="cat" data-go="/products?q=' + c[1] + '" data-testid="category-' + c[1] + '"><div class="e">' + c[2] + '</div>' + c[0] + '</div>'; }).join("") + '</div>' +
+      '<p class="dim" style="margin-top:24px">REST API: <code>' + esc(API) + '</code> · Demo account: arya@trendkart.test / Trendy@123</p></main>';
   }
-
-  function matches(p, q) {
-    var words = (q.q || "").toLowerCase().split(/\s+/).filter(Boolean);
-    var hay = (p.brand + " " + p.name + " " + p.cat + " " + p.type).toLowerCase().replace(/t-shirt/g, "tshirt");
-    var ok = words.every(function (w) {
-      w = w.replace(/s$/, "").replace(/t-shirt/, "tshirt");
-      if (w === "men") return p.cat === "men";
-      if (w === "women") return p.cat === "women";
-      return hay.split(/[^a-z0-9]+/).some(function (h) { return h === w || h.indexOf(w) === 0; });
-    });
-    if (!ok) return false;
-    if (q.brand) { var bs = q.brand.split(","); if (bs.indexOf(p.brand) < 0) return false; }
-    if (q.price) { var band = PRICE_BANDS.filter(function (b) { return b[0] === q.price; })[0]; if (band && (p.price < band[2] || p.price > band[3])) return false; }
-    if (q.gender && p.cat !== q.gender) return false;
-    return true;
-  }
-
   function listView(q) {
-    var key = JSON.stringify(q);
-    if (ui.loadedKey !== key) {
-      if (ui.loadingKey !== key) {
-        ui.loadingKey = key;
-        setTimeout(function () { ui.loadedKey = key; ui.loadingKey = null; if (JSON.stringify(parse().q) === key) render(); }, 900);
-      }
-      return header(q.q) + '<main><div class="spinner" role="progressbar" aria-label="Loading products" data-testid="loader">Loading products…</div></main>';
-    }
-    var all = P.filter(function (p) { return matches(p, { q: q.q }); });
-    var list = P.filter(function (p) { return matches(p, q); });
-    var sort = q.sort || "recommended";
-    if (sort === "price_asc") list.sort(function (a, b) { return a.price - b.price; });
-    if (sort === "price_desc") list.sort(function (a, b) { return b.price - a.price; });
-    if (sort === "rating") list.sort(function (a, b) { return b.rating - a.rating; });
-    if (sort === "discount") list.sort(function (a, b) { return off(b) - off(a); });
-    var brands = all.map(function (p) { return p.brand; }).filter(function (b, i, a) { return a.indexOf(b) === i; }).sort();
+    if (!S.list) return header(q.q) + '<main><div class="spinner" role="progressbar" aria-label="Loading products" data-testid="loader">Loading products…</div></main>';
+    var L = S.list, list = L.items, sort = q.sort || "recommended";
     var selBrands = (q.brand || "").split(",").filter(Boolean);
     var filters = '<aside class="filters" aria-label="Filters"><h3>Gender</h3>' +
       [["", "All"], ["men", "Men"], ["women", "Women"]].map(function (g) { return '<label><input type="radio" name="gender" value="' + g[0] + '"' + ((q.gender || "") === g[0] ? " checked" : "") + '> ' + g[1] + '</label>'; }).join("") +
-      '<h3>Brand</h3>' + brands.map(function (b) { var n = all.filter(function (p) { return p.brand === b; }).length; return '<label><input type="checkbox" name="brand" value="' + esc(b) + '"' + (selBrands.indexOf(b) >= 0 ? " checked" : "") + '> ' + esc(b) + ' <span style="color:#94969f">(' + n + ')</span></label>'; }).join("") +
-      '<h3>Price</h3>' + [["", "Any price"]].concat(PRICE_BANDS).map(function (b) { return '<label><input type="radio" name="price" value="' + b[0] + '"' + ((q.price || "") === b[0] ? " checked" : "") + '> ' + b[1] + '</label>'; }).join("") +
+      '<h3>Brand</h3>' + L.facets.brands.map(function (b) { return '<label><input type="checkbox" name="brand" value="' + esc(b.name) + '"' + (selBrands.indexOf(b.name) >= 0 ? " checked" : "") + '> ' + esc(b.name) + ' <span style="color:#94969f">(' + b.count + ')</span></label>'; }).join("") +
+      '<h3>Price</h3>' + [{ id: "", label: "Any price" }].concat(L.facets.priceBands).map(function (b) { return '<label><input type="radio" name="price" value="' + b.id + '"' + ((q.price || "") === b.id ? " checked" : "") + '> ' + b.label + '</label>'; }).join("") +
+      '<h3>Category</h3><select name="type" aria-label="Category" data-testid="type-filter"><option value="">All</option>' + L.facets.types.map(function (t) { return '<option value="' + esc(t) + '"' + (q.type === t ? " selected" : "") + '>' + esc(t) + '</option>'; }).join("") + '</select>' +
+      '<h3>Size</h3><select name="size" aria-label="Size" data-testid="size-filter"><option value="">Any</option>' + ["S", "M", "L", "XL", "6", "7", "8", "9", "10", "28", "30", "32", "34", "36"].map(function (s) { return '<option' + (q.size === s ? " selected" : "") + '>' + s + '</option>'; }).join("") + '</select>' +
       '<div style="margin-top:12px"><button class="ghost" data-action="clear-filters">Clear all</button></div></aside>';
     var cards = list.map(function (p) {
       return '<li class="product-base" data-testid="product-card" data-go="/p/' + p.id + '"><div class="img" aria-hidden="true">' + p.icon + '</div><div class="info">' +
         '<h3 class="product-brand" style="margin:0">' + esc(p.brand) + '</h3><h4 class="product-product" style="margin:2px 0 0;font-weight:400">' + esc(p.name) + '</h4>' +
-        '<div class="rating">' + p.rating.toFixed(1) + ' ★</div>' +
-        '<div class="product-price"><span class="product-discountedPrice" data-testid="product-price">' + inr(p.price) + '</span><span class="product-strike">' + inr(p.mrp) + '</span><span class="product-discountPercentage">(' + off(p) + '% OFF)</span></div></div></li>';
+        '<div class="rating">' + p.rating.toFixed(1) + ' ★ <span style="color:#94969f">(' + p.ratings.toLocaleString("en-IN") + ')</span></div>' +
+        '<div class="product-price"><span class="product-discountedPrice" data-testid="product-price">' + inr(p.price) + '</span><span class="product-strike">' + inr(p.mrp) + '</span><span class="product-discountPercentage">(' + p.discount + '% OFF)</span></div></div></li>';
     }).join("");
-    return header(q.q) + '<main><div class="layout">' + filters + '<section class="results"><div class="bar"><h1><span data-testid="results-title">' + esc(q.q || "All products") + '</span> <span class="title-count" data-testid="results-count" style="color:#7e818c;font-weight:400">- ' + list.length + ' items</span></h1>' +
+    return header(q.q) + '<main><div class="layout">' + filters + '<section class="results"><div class="bar"><h1><span data-testid="results-title">' + esc(q.q || "All products") + '</span> <span class="title-count" data-testid="results-count" style="color:#7e818c;font-weight:400">- ' + L.total + ' items</span></h1>' +
       '<label>Sort by: <select id="sort" aria-label="Sort by" data-testid="sort-select">' +
-      [["recommended", "Recommended"], ["price_asc", "Price: Low to High"], ["price_desc", "Price: High to Low"], ["rating", "Customer Rating"], ["discount", "Better Discount"]].map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === sort ? " selected" : "") + '>' + o[1] + '</option>'; }).join("") +
+      [["recommended", "Recommended"], ["popular", "Popularity"], ["price_asc", "Price: Low to High"], ["price_desc", "Price: High to Low"], ["rating", "Customer Rating"], ["discount", "Better Discount"]].map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === sort ? " selected" : "") + '>' + o[1] + '</option>'; }).join("") +
       '</select></label></div>' + (list.length ? '<ul class="grid" style="list-style:none;padding:0;margin:0" data-testid="results">' + cards + '</ul>' : '<div class="empty" data-testid="no-results">We couldn\'t find any matches!</div>') + '</section></div></main>';
   }
-
-  function pdpView(id) {
-    var p = byId(id);
-    if (!p) return header() + '<main><div class="empty">Product not found</div></main>';
-    var inWish = wishlist().indexOf(p.id) >= 0;
+  function pdpView() {
+    var d = S.pdp;
+    if (!d) return header() + '<main><div class="empty">Product not found</div></main>';
+    var p = d.product, inWish = d.wishlisted;
     return header() + '<main><div class="pdp"><div class="img" aria-hidden="true">' + p.icon + '</div><div class="details">' +
       '<h1 class="pdp-title" data-testid="pdp-brand" style="margin:0">' + esc(p.brand) + '</h1><h2 class="pdp-name" data-testid="pdp-name" style="font-weight:400;color:#535766;margin:4px 0 12px">' + esc(p.name) + '</h2>' +
-      '<div class="rating">' + p.rating.toFixed(1) + ' ★ Ratings</div>' +
-      '<p style="font-size:22px;margin:12px 0"><b data-testid="pdp-price">' + inr(p.price) + '</b> <span class="product-strike">MRP ' + inr(p.mrp) + '</span> <span class="product-discountPercentage">(' + off(p) + '% OFF)</span></p>' +
+      '<div class="rating">' + p.rating.toFixed(1) + ' ★ <span style="color:#94969f">' + p.ratings.toLocaleString("en-IN") + ' Ratings</span></div>' +
+      '<p style="font-size:22px;margin:12px 0"><b data-testid="pdp-price">' + inr(p.price) + '</b> <span class="product-strike">MRP ' + inr(p.mrp) + '</span> <span class="product-discountPercentage">(' + p.discount + '% OFF)</span></p>' +
+      '<p class="dim" data-testid="pdp-desc">' + esc(p.desc) + ' Colour: ' + esc(p.color) + '.</p>' +
       '<h3 style="font-size:14px;margin:16px 0 4px">SELECT SIZE</h3><div class="sizes" role="group" aria-label="Select size">' +
-      SIZES.map(function (s) { var oos = p.oos.indexOf(s) >= 0; return '<button class="size-buttons-size-button' + (ui.size === s ? " selected" : "") + '" data-size="' + s + '" aria-pressed="' + (ui.size === s) + '"' + (oos ? ' disabled title="Out of stock"' : '') + '>' + s + '</button>'; }).join("") + '</div>' +
+      p.sizes.map(function (s) { var oos = p.oos.indexOf(s) >= 0; return '<button class="size-buttons-size-button' + (ui.size === s ? " selected" : "") + '" data-size="' + s + '" aria-pressed="' + (ui.size === s) + '"' + (oos ? ' disabled title="Out of stock"' : '') + '>' + s + '</button>'; }).join("") + '</div>' +
       (ui.sizeError ? '<p class="size-error" role="alert" data-testid="size-error">Please select a size</p>' : '') +
       '<div style="display:flex;gap:10px;margin-top:14px"><button data-action="add-to-bag" data-testid="add-to-bag">ADD TO BAG</button>' +
-      '<button class="ghost" data-action="wishlist" data-testid="wishlist-button">' + (inWish ? "♥ WISHLISTED" : "♡ WISHLIST") + '</button></div></div></div></main>';
+      '<button class="ghost" data-action="wishlist" data-testid="wishlist-button">' + (inWish ? "♥ WISHLISTED" : "♡ WISHLIST") + '</button></div>' +
+      (d.similar.length ? '<h3 style="font-size:14px;margin:22px 0 6px">SIMILAR PRODUCTS</h3><ul style="list-style:none;padding:0;margin:0;display:flex;gap:10px;flex-wrap:wrap">' + d.similar.map(function (s) { return '<li><a href="#/p/' + s.id + '" data-testid="similar-product">' + esc(s.brand) + ' ' + esc(s.name) + ' · ' + inr(s.price) + '</a></li>'; }).join("") + '</ul>' : '') +
+      '</div></div></main>';
   }
-
-  function totals() {
-    var items = bag();
-    var mrp = 0, price = 0;
-    items.forEach(function (it) { var p = byId(it.id); mrp += p.mrp * it.qty; price += p.price * it.qty; });
-    var c = get("coupon", null), couponOff = 0;
-    if (c && COUPONS[c]) { var cp = COUPONS[c]; couponOff = cp.pct ? Math.round(price * cp.pct / 100) : cp.flat; }
-    var delivery = items.length && price - couponOff < 999 ? 99 : 0;
-    return { mrp: mrp, discount: mrp - price, coupon: couponOff, delivery: delivery, total: price - couponOff + delivery, count: items.reduce(function (s, x) { return s + x.qty; }, 0) };
-  }
-
   function bagView() {
-    var items = bag();
+    var items = S.bag.items, t = S.bag.totals;
     if (!items.length) return header() + '<main><div class="empty" data-testid="empty-bag"><div style="font-size:48px">👜</div><h2>Hey, it feels so light!</h2><p>There is nothing in your bag. Let\'s add some items.</p><button data-go="/products?q=shirt">Shop shirts</button></div></main>';
-    var t = totals();
-    var rows = items.map(function (it, i) {
-      var p = byId(it.id);
-      return '<div class="bag-item" data-testid="bag-item"><div class="img" aria-hidden="true">' + p.icon + '</div><div style="flex:1"><b data-testid="bag-item-brand">' + esc(p.brand) + '</b><div style="font-size:13px;color:#535766" data-testid="bag-item-name">' + esc(p.name) + '</div>' +
-        '<div style="display:flex;gap:10px;margin-top:6px;font-size:13px"><span data-testid="bag-item-size">Size: ' + it.size + '</span>' +
-        '<label>Qty: <select data-qty="' + i + '" aria-label="Quantity for ' + esc(p.name) + '">' + [1, 2, 3, 4, 5].map(function (n) { return '<option' + (n === it.qty ? " selected" : "") + '>' + n + '</option>'; }).join("") + '</select></label></div>' +
-        '<div style="margin-top:6px"><b data-testid="bag-item-price">' + inr(p.price * it.qty) + '</b></div></div>' +
-        '<button class="ghost" data-remove="' + i + '" aria-label="Remove ' + esc(p.name) + '">Remove</button></div>';
+    var rows = items.map(function (it) {
+      return '<div class="bag-item" data-testid="bag-item"><div class="img" aria-hidden="true">' + it.icon + '</div><div style="flex:1"><b data-testid="bag-item-brand">' + esc(it.brand) + '</b><div style="font-size:13px;color:#535766" data-testid="bag-item-name">' + esc(it.name) + '</div>' +
+        '<div style="display:flex;gap:10px;margin-top:6px;font-size:13px"><span data-testid="bag-item-size">Size: ' + esc(it.size) + '</span>' +
+        '<label>Qty: <select data-qty="' + it.lineId + '" aria-label="Quantity for ' + esc(it.name) + '">' + [1, 2, 3, 4, 5].map(function (n) { return '<option' + (n === it.qty ? " selected" : "") + '>' + n + '</option>'; }).join("") + '</select></label></div>' +
+        '<div style="margin-top:6px"><b data-testid="bag-item-price">' + inr(it.lineTotal) + '</b> <span class="product-strike">' + inr(it.mrp * it.qty) + '</span></div></div>' +
+        '<button class="ghost" data-remove="' + it.lineId + '" aria-label="Remove ' + esc(it.name) + '">Remove</button></div>';
     }).join("");
-    var c = get("coupon", null);
+    var c = S.bag.coupon;
     return header() + '<main><div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start"><section style="flex:1;min-width:280px"><h1 style="font-size:18px">My Bag <span data-testid="bag-title-count">(' + t.count + ' item' + (t.count === 1 ? '' : 's') + ')</span></h1>' + rows + '</section>' +
       '<aside class="price-details" aria-label="Price details"><h2 style="font-size:13px;text-transform:uppercase;margin:0 0 10px">Coupons</h2>' +
       '<form class="coupon" id="coupon-form"><input id="coupon" placeholder="Enter coupon code" aria-label="Coupon code" value="' + esc(c || "") + '"><button type="submit" class="ghost">Apply</button></form>' +
@@ -236,71 +217,123 @@
       '<div class="price-row"><span>Coupon Discount</span><span data-testid="coupon-discount" style="color:#03a685">' + (t.coupon ? "-" + inr(t.coupon) : "Apply Coupon") + '</span></div>' +
       '<div class="price-row"><span>Delivery Fee</span><span data-testid="delivery-fee">' + (t.delivery ? inr(t.delivery) : "FREE") + '</span></div>' +
       '<div class="price-row price-total"><span>Total Amount</span><span data-testid="total-amount">' + inr(t.total) + '</span></div>' +
-      '<button style="width:100%;margin-top:10px" data-action="place-order" data-testid="place-order">PLACE ORDER</button></aside></div></main>';
+      '<button style="width:100%;margin-top:10px" data-go="/checkout" data-action="place-order" data-testid="place-order">PLACE ORDER</button></aside></div></main>';
   }
-
+  function checkoutView() {
+    var t = S.bag.totals;
+    if (!S.bag.items.length) return header() + '<main><div class="empty" data-testid="empty-bag"><h2>Your bag is empty</h2><button data-go="/">Continue shopping</button></div></main>';
+    var saved = S.user && S.addresses.length ? '<h3 style="font-size:14px">Saved addresses</h3>' + S.addresses.map(function (a) { return '<label class="addr" data-testid="saved-address"><input type="radio" name="addressId" value="' + a.id + '"' + (a.default ? " checked" : "") + '> <b>' + esc(a.name) + '</b> · ' + esc(a.line1) + ', ' + esc(a.city) + ' ' + esc(a.pincode) + ' (' + esc(a.type) + ')</label>'; }).join("") + '<label class="addr"><input type="radio" name="addressId" value=""' + (S.addresses.length ? "" : " checked") + '> Use a new address</label>' : '';
+    return header() + '<main><h1 style="font-size:18px">Checkout</h1>' + (S.user ? '' : '<p class="dim">Checking out as guest. <a href="#/login" data-testid="checkout-login">Log in</a> to save addresses and see order history.</p>') +
+      '<form id="checkout-form" novalidate class="checkout">' + saved +
+      '<div class="addr-form" data-testid="address-form"><h3 style="font-size:14px">Delivery address</h3><div class="two">' +
+      '<label>Full name<input name="name" aria-label="Full name" data-testid="addr-name"></label><label>Mobile (10 digits)<input name="phone" aria-label="Mobile number" data-testid="addr-phone"></label>' +
+      '<label style="grid-column:1/-1">Address line<input name="line1" aria-label="Address line" data-testid="addr-line1"></label>' +
+      '<label>City<input name="city" aria-label="City" data-testid="addr-city"></label><label>State<input name="state" aria-label="State" data-testid="addr-state"></label>' +
+      '<label>Pincode (6 digits)<input name="pincode" aria-label="Pincode" data-testid="addr-pincode"></label><label>Address type<select name="type" aria-label="Address type"><option value="home">Home</option><option value="office">Office</option></select></label></div></div>' +
+      '<h3 style="font-size:14px">Payment</h3><div class="pay" role="radiogroup" aria-label="Payment method">' + [["upi", "UPI"], ["card", "Credit / Debit card"], ["cod", "Cash on delivery"]].map(function (p, i) { return '<label><input type="radio" name="payment" value="' + p[0] + '"' + (i === 0 ? " checked" : "") + '> ' + p[1] + '</label>'; }).join("") + '</div>' +
+      (ui.checkoutError ? '<p class="msg-err" role="alert" data-testid="checkout-error">' + esc(ui.checkoutError) + '</p>' : '') +
+      '<aside class="price-details" style="margin-top:14px"><div class="price-row"><span>Items</span><span>' + t.count + '</span></div><div class="price-row"><span>Coupon Discount</span><span data-testid="coupon-discount">' + (t.coupon ? "-" + inr(t.coupon) : "—") + '</span></div><div class="price-row"><span>Delivery Fee</span><span data-testid="delivery-fee">' + (t.delivery ? inr(t.delivery) : "FREE") + '</span></div><div class="price-row price-total"><span>Total Amount</span><span data-testid="total-amount">' + inr(t.total) + '</span></div>' +
+      '<button type="submit" style="width:100%;margin-top:10px" data-testid="confirm-order">CONFIRM ORDER</button></aside></form></main>';
+  }
   function wishlistView() {
-    var w = wishlist();
+    var w = S.wishlist;
     return header() + '<main><h1 style="font-size:18px">My Wishlist <span data-testid="wishlist-title-count">' + w.length + ' item' + (w.length === 1 ? '' : 's') + '</span></h1>' +
-      (w.length ? '<ul class="grid" style="list-style:none;padding:0">' + w.map(function (id) { var p = byId(id); return '<li class="product-base" data-testid="wishlist-item" data-go="/p/' + p.id + '"><div class="img">' + p.icon + '</div><div class="info"><div class="product-brand">' + esc(p.brand) + '</div><div class="product-product">' + esc(p.name) + '</div><div class="product-discountedPrice">' + inr(p.price) + '</div></div></li>'; }).join("") + '</ul>' : '<div class="empty">Your wishlist is empty.</div>') + '</main>';
+      (w.length ? '<ul class="grid" style="list-style:none;padding:0">' + w.map(function (p) {
+        return '<li class="product-base" data-testid="wishlist-item"><div class="img" data-go="/p/' + p.id + '" role="link">' + p.icon + '</div><div class="info"><div class="product-brand">' + esc(p.brand) + '</div><div class="product-product">' + esc(p.name) + '</div><div class="product-discountedPrice">' + inr(p.price) + '</div>' +
+          '<div style="display:flex;gap:6px;margin-top:8px;align-items:center"><select data-move-size="' + p.id + '" aria-label="Size for ' + esc(p.name) + '"><option value="">Size</option>' + p.sizes.map(function (s) { return '<option' + (p.oos.indexOf(s) >= 0 ? " disabled" : "") + (ui.moveSize[p.id] === s ? " selected" : "") + '>' + s + '</option>'; }).join("") + '</select>' +
+          '<button class="ghost" data-move="' + p.id + '" data-testid="move-to-bag">Move to bag</button><button class="ghost" data-unwish="' + p.id + '" aria-label="Remove ' + esc(p.name) + ' from wishlist">✕</button></div></div></li>';
+      }).join("") + '</ul>' : '<div class="empty">Your wishlist is empty.</div>') + '</main>';
   }
-
+  function orderConfirmedView() {
+    var o = S.lastOrder;
+    return header() + '<main><div class="empty"><div style="font-size:48px">🎉</div><h1 data-testid="order-confirmed">Order confirmed</h1>' + (o ? '<p>Order <b data-testid="order-id">' + esc(o.id) + '</b> · Total paid <b data-testid="order-total">' + inr(o.totals.total) + '</b> · ' + esc(o.payment.toUpperCase()) + '</p><p><a href="#/orders/' + esc(o.id) + '" data-testid="view-order">View order</a></p>' : '') + '<button data-go="/">Continue shopping</button></div></main>';
+  }
+  function ordersView() {
+    return header() + '<main><h1 style="font-size:18px">My Orders <span class="dim" data-testid="orders-count">(' + S.orders.length + ')</span></h1>' +
+      (S.orders.length ? S.orders.map(function (o) { return '<div class="bag-item" data-testid="order-row"><div style="flex:1"><a href="#/orders/' + esc(o.id) + '" data-testid="order-link"><b>' + esc(o.id) + '</b></a><div class="dim">' + esc(new Date(o.placedAt).toLocaleString()) + ' · ' + o.items.length + ' line' + (o.items.length === 1 ? '' : 's') + ' · ' + esc(o.payment.toUpperCase()) + '</div></div><b data-testid="order-total">' + inr(o.totals.total) + '</b><span class="badge ' + o.status + '" data-testid="order-status">' + esc(o.status) + '</span></div>'; }).join("") : '<div class="empty" data-testid="no-orders">No orders yet.</div>') + '</main>';
+  }
   function orderView() {
-    var o = get("lastOrder", null);
-    return header() + '<main><div class="empty"><div style="font-size:48px">🎉</div><h1 data-testid="order-confirmed">Order confirmed</h1>' + (o ? '<p>Order <b data-testid="order-id">' + o.id + '</b> · Total paid <b data-testid="order-total">' + inr(o.total) + '</b></p>' : '') + '<button data-go="/">Continue shopping</button></div></main>';
+    var o = S.order;
+    if (!o) return header() + '<main><div class="empty">Order not found</div></main>';
+    return header() + '<main><a href="#/orders" class="dim">← My Orders</a><h1 style="font-size:18px">Order ' + esc(o.id) + ' <span class="badge ' + o.status + '" data-testid="order-status">' + esc(o.status) + '</span></h1>' +
+      o.items.map(function (i) { return '<div class="bag-item" data-testid="order-item"><div style="flex:1"><b>' + esc(i.brand) + '</b><div class="dim">' + esc(i.name) + ' · Size ' + esc(i.size) + ' · Qty ' + i.qty + '</div></div><b>' + inr(i.price * i.qty) + '</b></div>'; }).join("") +
+      '<aside class="price-details" style="margin-top:12px"><div class="price-row"><span>Placed</span><span>' + esc(new Date(o.placedAt).toLocaleString()) + '</span></div><div class="price-row"><span>Deliver to</span><span data-testid="order-address">' + (o.address ? esc(o.address.name + ", " + o.address.city + " " + o.address.pincode) : "—") + '</span></div><div class="price-row"><span>Payment</span><span>' + esc(o.payment.toUpperCase()) + '</span></div><div class="price-row"><span>Coupon</span><span>' + (o.totals.coupon ? "-" + inr(o.totals.coupon) : "—") + '</span></div><div class="price-row"><span>Delivery</span><span>' + (o.totals.delivery ? inr(o.totals.delivery) : "FREE") + '</span></div><div class="price-row price-total"><span>Total</span><span data-testid="order-total">' + inr(o.totals.total) + '</span></div>' +
+      (o.status === "confirmed" ? '<button class="ghost" style="width:100%;margin-top:10px" data-action="cancel-order" data-testid="cancel-order">Cancel order</button>' : '') + '</aside></main>';
   }
-
+  function authView(mode) {
+    var reg = mode === "register";
+    return header() + '<main><div class="auth"><h1 style="font-size:20px">' + (reg ? "Create account" : "Login") + '</h1>' +
+      '<form id="auth-form" data-mode="' + mode + '" novalidate>' + (reg ? '<label>Name<input name="name" aria-label="Name" data-testid="auth-name"></label><label>Mobile<input name="phone" aria-label="Mobile" data-testid="auth-phone"></label>' : '') +
+      '<label>Email<input name="email" type="email" aria-label="Email" data-testid="auth-email"></label><label>Password<input name="password" type="password" aria-label="Password" data-testid="auth-password"></label>' +
+      (ui.authError ? '<p class="msg-err" role="alert" data-testid="auth-error">' + esc(ui.authError) + '</p>' : '') +
+      '<button type="submit" style="width:100%" data-testid="auth-submit">' + (reg ? "CREATE ACCOUNT" : "LOGIN") + '</button></form>' +
+      '<p class="dim">' + (reg ? 'Have an account? <a href="#/login">Login</a>' : 'New here? <a href="#/register" data-testid="go-register">Create an account</a> · demo: arya@trendkart.test / Trendy@123') + '</p></div></main>';
+  }
+  function accountView() {
+    var u = S.user;
+    return header() + '<main><h1 style="font-size:18px">Hello, <span data-testid="account-name">' + esc(u.name) + '</span></h1><p class="dim">' + esc(u.email) + (u.phone ? ' · ' + esc(u.phone) : '') + '</p>' +
+      '<div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start"><section style="flex:1;min-width:280px"><h2 style="font-size:15px">Addresses</h2>' +
+      (S.addresses.length ? S.addresses.map(function (a) { return '<div class="bag-item" data-testid="address-row"><div style="flex:1"><b>' + esc(a.name) + '</b> ' + (a.default ? '<span class="badge">default</span>' : '') + '<div class="dim">' + esc(a.line1) + ', ' + esc(a.city) + ', ' + esc(a.state) + ' ' + esc(a.pincode) + ' · ' + esc(a.phone) + '</div></div><button class="ghost" data-del-address="' + a.id + '" aria-label="Delete address ' + esc(a.name) + '">Delete</button></div>'; }).join("") : '<p class="dim" data-testid="no-addresses">No saved addresses.</p>') +
+      '<form id="address-form" novalidate class="checkout"><div class="two"><label>Full name<input name="name" aria-label="Full name"></label><label>Mobile<input name="phone" aria-label="Mobile number"></label><label style="grid-column:1/-1">Address line<input name="line1" aria-label="Address line"></label><label>City<input name="city" aria-label="City"></label><label>State<input name="state" aria-label="State"></label><label>Pincode<input name="pincode" aria-label="Pincode"></label><label>Type<select name="type" aria-label="Address type"><option value="home">Home</option><option value="office">Office</option></select></label></div>' + (ui.addressError ? '<p class="msg-err" role="alert" data-testid="address-error">' + esc(ui.addressError) + '</p>' : '') + '<button type="submit" class="ghost" data-testid="save-address">Save address</button></form></section>' +
+      '<section style="flex:1;min-width:280px"><h2 style="font-size:15px">Recent orders</h2>' + (S.orders.length ? S.orders.slice(0, 5).map(function (o) { return '<div class="bag-item"><a href="#/orders/' + esc(o.id) + '">' + esc(o.id) + '</a><span class="dim" style="flex:1">' + esc(new Date(o.placedAt).toLocaleDateString()) + '</span><b>' + inr(o.totals.total) + '</b></div>'; }).join("") + '<p><a href="#/orders">All orders</a></p>' : '<p class="dim">No orders yet.</p>') +
+      '<button class="ghost" data-action="logout" data-testid="logout">Logout</button></section></div></main>';
+  }
   var lastPath = null;
   function render() {
     var r = parse();
-    if (r.path !== lastPath) { ui.size = null; ui.sizeError = false; if (r.path !== "/bag") ui.couponMsg = null; lastPath = r.path; }
+    if (!S.ready) { app.innerHTML = '<header><div class="logo">TrendKart</div></header><main><div class="spinner" role="progressbar">Loading…</div></main>'; return; }
+    if (r.path !== lastPath) { ui.size = null; ui.sizeError = false; if (r.path !== "/bag") ui.couponMsg = null; ui.authError = ""; ui.checkoutError = ""; lastPath = r.path; }
     var html;
     if (r.path === "/") html = homeView();
     else if (r.path === "/products") html = listView(r.q);
-    else if (r.path.indexOf("/p/") === 0) html = pdpView(r.path.slice(3));
+    else if (r.path.indexOf("/p/") === 0) html = pdpView();
     else if (r.path === "/bag") html = bagView();
+    else if (r.path === "/checkout") html = checkoutView();
     else if (r.path === "/wishlist") html = wishlistView();
-    else if (r.path === "/order-confirmed") html = orderView();
+    else if (r.path === "/order-confirmed") html = orderConfirmedView();
+    else if (r.path === "/orders") html = ordersView();
+    else if (r.path.indexOf("/orders/") === 0) html = orderView();
+    else if (r.path === "/login") html = S.user ? accountView() : authView("login");
+    else if (r.path === "/register") html = S.user ? accountView() : authView("register");
+    else if (r.path === "/account") html = S.user ? accountView() : authView("login");
     else html = header() + '<main><div class="empty">Page not found</div></main>';
     app.innerHTML = html;
-    var p = r.path.indexOf("/p/") === 0 ? byId(r.path.slice(3)) : null;
+    var p = r.path.indexOf("/p/") === 0 && S.pdp ? S.pdp.product : null;
     document.title = p ? p.brand + " " + p.name + " | TrendKart" : r.path === "/bag" ? "Shopping Bag | TrendKart" : r.path === "/products" ? (r.q.q || "Products") + " | TrendKart" : "TrendKart | Fashion Store";
   }
-
   function updateQuery(patch) {
     var r = parse(), q = {};
     Object.keys(r.q).forEach(function (k) { q[k] = r.q[k]; });
     Object.keys(patch).forEach(function (k) { q[k] = patch[k]; });
     go("/products" + qs(q));
   }
-
+  function formData(form) { var o = {}; Array.prototype.forEach.call(form.elements, function (el) { if (el.name && (el.type !== "radio" || el.checked)) o[el.name] = el.value.trim(); }); return o; }
   app.addEventListener("click", function (e) {
-    var t = e.target.closest("[data-go],[data-action],[data-size],[data-remove]");
+    var t = e.target.closest("[data-go],[data-action],[data-size],[data-remove],[data-move],[data-unwish],[data-del-address]");
     if (!t || t.disabled) return;
-    if (t.dataset.go) { if (location.hash.replace(/^#/, "") === t.dataset.go) return render(); return go(t.dataset.go); }
+    if (t.dataset.go) { if (location.hash.replace(/^#/, "") === t.dataset.go) return load(); return go(t.dataset.go); }
     var id = +parse().path.slice(3);
     if (t.dataset.size) { ui.size = t.dataset.size; ui.sizeError = false; return render(); }
     if (t.dataset.action === "add-to-bag") {
       if (!ui.size) { ui.sizeError = true; return render(); }
-      var b = bag(), ex = b.filter(function (x) { return x.id === id && x.size === ui.size; })[0];
-      if (ex) ex.qty += 1; else b.push({ id: id, size: ui.size, qty: 1 });
-      set("bag", b); toast("Added to bag"); return render();
+      return api("POST", "/bag/items", { productId: id, size: ui.size, qty: 1 }).then(function (r) { if (r.ok) { S.bag = r.data; toast("Added to bag"); } else toast(fail(r, "Could not add")); render(); });
     }
     if (t.dataset.action === "wishlist") {
-      var w = wishlist(), i = w.indexOf(id);
-      if (i >= 0) w.splice(i, 1); else w.push(id);
-      set("wishlist", w); toast(i >= 0 ? "Removed from wishlist" : "Added to wishlist"); return render();
+      var wished = S.pdp && S.pdp.wishlisted;
+      return (wished ? api("DELETE", "/wishlist/" + id) : api("POST", "/wishlist", { productId: id })).then(function () { return api("GET", "/wishlist"); }).then(function (r) { if (r.ok) S.wishlist = r.data.items; if (S.pdp) S.pdp.wishlisted = !wished; toast(wished ? "Removed from wishlist" : "Added to wishlist"); render(); });
     }
-    if (t.dataset.remove != null) { var bb = bag(); bb.splice(+t.dataset.remove, 1); set("bag", bb); if (!bb.length) set("coupon", null); return render(); }
+    if (t.dataset.remove != null) return api("DELETE", "/bag/items/" + t.dataset.remove).then(function (r) { if (r.ok) S.bag = r.data; render(); });
+    if (t.dataset.unwish != null) return api("DELETE", "/wishlist/" + t.dataset.unwish).then(function () { return api("GET", "/wishlist"); }).then(function (r) { if (r.ok) S.wishlist = r.data.items; render(); });
+    if (t.dataset.move != null) {
+      var size = ui.moveSize[t.dataset.move];
+      if (!size) { toast("Select a size first"); return render(); }
+      return api("POST", "/wishlist/" + t.dataset.move + "/move-to-bag", { size: size }).then(function (r) { if (r.ok) { S.bag = r.data; toast("Moved to bag"); } else toast(fail(r, "Could not move")); return api("GET", "/wishlist"); }).then(function (r) { if (r.ok) S.wishlist = r.data.items; render(); });
+    }
+    if (t.dataset.delAddress != null) return api("DELETE", "/addresses/" + t.dataset.delAddress).then(function () { return load(); });
     if (t.dataset.action === "clear-filters") { var q0 = parse().q; return go("/products" + qs({ q: q0.q, sort: q0.sort })); }
-    if (t.dataset.action === "place-order") {
-      var tt = totals();
-      set("lastOrder", { id: "TK" + String(Date.now()).slice(-6), total: tt.total, items: bag() });
-      set("bag", []); set("coupon", null);
-      return go("/order-confirmed");
-    }
+    if (t.dataset.action === "cancel-order") return api("POST", "/orders/" + encodeURIComponent(S.order.id) + "/cancel").then(function (r) { if (r.ok) { S.order = r.data.order; toast("Order cancelled"); } else toast(fail(r, "Could not cancel")); render(); });
+    if (t.dataset.action === "logout") return api("POST", "/auth/logout").then(function () { S.user = null; S.addresses = []; toast("Logged out"); go("/"); });
   });
-
   app.addEventListener("change", function (e) {
     var el = e.target;
     if (el.id === "sort") return updateQuery({ sort: el.value === "recommended" ? "" : el.value });
@@ -310,27 +343,49 @@
     }
     if (el.name === "price") return updateQuery({ price: el.value });
     if (el.name === "gender") return updateQuery({ gender: el.value });
-    if (el.dataset.qty != null) { var b = bag(); b[+el.dataset.qty].qty = +el.value; set("bag", b); return render(); }
+    if (el.name === "type") return updateQuery({ type: el.value });
+    if (el.name === "size" && el.dataset.moveSize == null) return updateQuery({ size: el.value });
+    if (el.dataset.moveSize != null) { ui.moveSize[el.dataset.moveSize] = el.value; return; }
+    if (el.dataset.qty != null) return api("PATCH", "/bag/items/" + el.dataset.qty, { qty: +el.value }).then(function (r) { if (r.ok) S.bag = r.data; else toast(fail(r, "Could not update")); render(); });
   });
-
   app.addEventListener("submit", function (e) {
     e.preventDefault();
-    if (e.target.id === "search-form") {
+    var f = e.target;
+    if (f.id === "search-form") {
       var v = document.getElementById("search").value.trim();
       if (v) go("/products" + qs({ q: v }));
     }
-    if (e.target.id === "coupon-form") {
+    if (f.id === "coupon-form") {
       var code = document.getElementById("coupon").value.trim().toUpperCase();
-      var t = totals(), price = t.mrp - t.discount;
-      if (!COUPONS[code]) { set("coupon", null); ui.couponMsg = { ok: false, text: "Invalid coupon code" }; }
-      else if (price < COUPONS[code].min) { set("coupon", null); ui.couponMsg = { ok: false, text: "Add items worth " + inr(COUPONS[code].min - price) + " more to use " + code }; }
-      else { set("coupon", code); ui.couponMsg = { ok: true, text: "Coupon " + code + " applied" }; }
-      render();
+      return api("POST", "/bag/coupon", { code: code }).then(function (r) {
+        if (r.ok) { S.bag = r.data; ui.couponMsg = { ok: true, text: "Coupon " + code + " applied" }; }
+        else { ui.couponMsg = { ok: false, text: fail(r, "Invalid coupon code") }; return api("GET", "/bag").then(function (b) { if (b.ok) S.bag = b.data; }); }
+      }).then(render);
+    }
+    if (f.id === "checkout-form") {
+      var d = formData(f), body = { payment: d.payment || "upi" };
+      if (d.addressId) body.addressId = +d.addressId; else body.address = { name: d.name, phone: d.phone, line1: d.line1, city: d.city, state: d.state, pincode: d.pincode, type: d.type };
+      return api("POST", "/orders", body).then(function (r) {
+        if (!r.ok) { ui.checkoutError = fail(r, "Could not place the order"); return render(); }
+        S.lastOrder = r.data.order; S.bag = { items: [], coupon: null, couponLabel: null, totals: { mrp: 0, discount: 0, coupon: 0, delivery: 0, total: 0, count: 0 } };
+        go("/order-confirmed");
+      });
+    }
+    if (f.id === "auth-form") {
+      var a = formData(f), reg = f.dataset.mode === "register";
+      return api("POST", reg ? "/auth/register" : "/auth/login", a).then(function (r) {
+        if (!r.ok) { ui.authError = fail(r, "Login failed"); return render(); }
+        S.user = r.data.user; toast(reg ? "Welcome, " + r.data.user.name : "Logged in");
+        go(S.bag.items.length ? "/bag" : "/account");
+      });
+    }
+    if (f.id === "address-form") {
+      return api("POST", "/addresses", formData(f)).then(function (r) { if (!r.ok) { ui.addressError = fail(r, "Could not save"); return render(); } ui.addressError = ""; toast("Address saved"); return load(); });
     }
   });
-
-  window.addEventListener("hashchange", render);
+  window.addEventListener("hashchange", function () { ui.moveSize = {}; load(); });
   render();
+  loadSession().then(load, load);
 })();
 </script>
 </body>

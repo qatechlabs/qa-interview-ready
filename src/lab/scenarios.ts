@@ -139,7 +139,7 @@ export const SCENARIOS: Scenario[] = [
     criteria: [
       "Open the app and log in as standard_user with password secret_sauce.",
       "Assert the URL contains /inventory.",
-      "Assert the Products title is visible and exactly 6 products are listed.",
+      "Assert the Products title is visible and exactly 12 products are listed.",
     ],
     hints: [
       "Inputs have placeholders, so page.getByPlaceholder('Username') works.",
@@ -493,7 +493,7 @@ test('wrong password shows Invalid credentials', async ({ page }) => {
     minAssertions: 2,
     skills: ["Test data", "Toasts", "Table assertions"],
     checks: [
-      { label: "A new employee was created", test: (c) => Array.isArray(c.lab?.employees) && c.lab.employees.length === 7 },
+      { label: "A new employee was created", test: (c) => Array.isArray(c.lab?.employees) && c.lab.employees.length === 15 },
       { label: "The list is filtered to exactly one record", test: (c) => /\(1\) Record Found/.test(c.doc?.querySelector("[data-test=records-found]")?.textContent || "") },
       { label: "You asserted the success toast", test: (c) => codeHas(c, /Successfully Saved/) },
       { label: "You asserted the search result", test: (c) => usesAny(c, "toHaveCount", "toContainText", "toHaveText", "toBeVisible") && c.result.assertions.passed >= 2 },
@@ -552,7 +552,7 @@ test('wrong password shows Invalid credentials', async ({ page }) => {
       "Log in and open PIM.",
       "Click Delete for Vikram Singh, then \"No, Cancel\" and assert he is still listed.",
       "Click Delete again, confirm with \"Yes, Delete\" and assert the \"Successfully Deleted\" toast.",
-      "Assert Vikram Singh is gone and the list now shows 5 records.",
+      "Assert Vikram Singh is gone and the list now shows 13 records.",
     ],
     hints: [
       "Each Delete button has an accessible name like \"Delete Vikram Singh\".",
@@ -575,7 +575,7 @@ test('wrong password shows Invalid credentials', async ({ page }) => {
     skills: ["Dialogs", "Both branches", "Disappearance assertions"],
     checks: [
       { label: "Vikram Singh was deleted", test: (c) => Array.isArray(c.lab?.employees) && !c.lab.employees.some((e: { first: string }) => e.first === "Vikram") },
-      { label: "Nobody else was deleted", test: (c) => c.lab?.employees?.length === 5 },
+      { label: "Nobody else was deleted", test: (c) => c.lab?.employees?.length === 13 },
       { label: "You tested the Cancel path", test: (c) => codeHas(c, /No, Cancel|Cancel/) },
       { label: "You asserted the record is gone", test: (c) => usesAny(c, "toHaveCount", "toBeHidden") || codeHas(c, /not\.toBeVisible|not\.toContainText/) },
     ],
@@ -937,7 +937,7 @@ export class EmployeesPage {
       { label: "The fixture has teardown code after use()", test: (c) => /await\s+use\([^)]*\)\s*;?[\s\S]*?(delete|Delete)/.test(c.files["fixtures.ts"] || "") },
       { label: "The test passed", test: (c) => c.result.tests.length >= 1 && c.result.tests.every((t) => t.ok) },
       { label: "You asserted the search result", test: (c) => usesAny(c, "toHaveText", "toContainText", "toHaveCount") },
-      { label: "Teardown restored the list to 6 employees", test: (c) => Array.isArray(c.lab?.employees) && c.lab.employees.length === 6 },
+      { label: "Teardown restored the list to 14 employees", test: (c) => Array.isArray(c.lab?.employees) && c.lab.employees.length === 14 },
     ],
   },
   {
@@ -950,7 +950,7 @@ export class EmployeesPage {
     story:
       "\"We have 40 search terms to cover and I don't want 40 copies of the same test. Show me a data-driven design: a data file, a helper for prices, a page object, and a spec that generates a test per row.\"",
     criteria: [
-      "data/searches.ts exports SEARCHES: at least three rows of { query, expectedCount, mustContain } (shirt → 5 results all containing Shirt, jeans → 2, kurta → 2).",
+      "data/searches.ts exports SEARCHES: at least three rows of { query, expectedCount, mustContain } (shirt → 5 results all containing Shirt, jeans → 2, kurta → 3).",
       "helpers/money.ts exports parsePrice('₹1,199') that returns 1199.",
       "pages/search.page.ts: SearchPage with search(query), resultCount(), productNames() and prices().",
       "tests/search.spec.ts generates one test per row with a loop, asserting the count and that every name contains mustContain, plus one test that sorts by Price: Low to High and uses parsePrice to assert the prices ascend.",
@@ -1056,7 +1056,7 @@ export class SearchPage {
 
   // TODO: fill the username and password, click Login
 
-  // TODO: assert the URL, the "Products" title and 6 items
+  // TODO: assert the URL, the "Products" title and 12 items
 });
 
 test('locked out user sees an error', async ({ page }) => {
