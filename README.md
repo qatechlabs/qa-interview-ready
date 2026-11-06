@@ -87,3 +87,11 @@ To change the price, update `PRICE_AMOUNT` (in paise). To change how many questi
 | `npm run start` | Serve the production build |
 | `npm run lint` | ESLint |
 | `npm run content` | Convert `content/*.md` to JSON and validate it |
+
+## Live automation labs
+
+`/labs` hosts scenario-based coding rounds. Learners write Playwright-style TypeScript in the browser and watch it drive a practice app in an iframe.
+
+- Practice apps (static, same origin): `public/sandbox/{swagshop,peopledesk,trendkart}/index.html`, served at `/sandbox/<app>` via a rewrite in `next.config.mjs`. Each app keeps state in `sessionStorage` under `lab:<app>:` and exposes it on `window.__lab` for scenario checks.
+- Runtime: `src/lib/lab/runtime.ts` implements a Playwright-compatible subset (locators, auto-waiting actions, web-first `expect`, `test`/`describe`/`beforeEach`/`step`). TypeScript is stripped with sucrase.
+- Scenarios and checks: `src/lab/scenarios.ts`. Reference solutions (Playwright + Selenium Java) are server-only in `src/lab/solutions.ts` and only sent for free scenarios or to full-access users.
