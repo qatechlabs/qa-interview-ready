@@ -63,7 +63,7 @@ export const LAB_APPS: LabApp[] = [
     styledAfter: "the real OrangeHRM open-source demo at opensource-demo.orangehrmlive.com",
     icon: "🏢",
     base: "https://opensource-demo.orangehrmlive.com",
-    blurb: "A full HR system: login, dashboard, PIM employee records, leave, recruitment. Shared and slow, like a real client environment.",
+    blurb: "A full HR system: login, dashboard, PIM employee records, leave, recruitment, plus the REST API (/web/index.php/api/v2) its screens run on. Shared and slow, like a real client environment.",
     credentials: "Admin / admin123",
     remote: true,
   },
@@ -1314,6 +1314,51 @@ export class PimPage {
     ],
   },
   {
+    id: "orangehrm-ui-api-employees",
+    app: "orangehrm",
+    title: "UI + API: the employee list agrees with the PIM REST API",
+    level: "Mid",
+    minutes: 25,
+    free: true,
+    story:
+      "\"OrangeHRM's screens are driven by its own REST API under /web/index.php/api/v2. Prove the two layers agree: log in through the UI, read the Employee List, and check it against GET /api/v2/pim/employees using the browser's session. Then show the API refuses a caller with no session. The demo is shared with the whole internet, so expect the numbers to move a little between two calls.\"",
+    criteria: [
+      "Log in as Admin / admin123 through the UI and open PIM → Employee List (/web/index.php/pim/viewEmployeeList).",
+      "Call GET /web/index.php/api/v2/pim/employees?limit=50&offset=0&includeEmployees=onlyCurrent with page.request (it carries the browser's cookies) and assert the response is OK with a non-empty data array whose items have empNumber and firstName.",
+      "Read the \"(N) Records Found\" text on the list and assert it matches meta.total from the API (allow a drift of a few records: other people add employees while your test runs).",
+      "In a second test, call the same endpoint with the plain request fixture (no session, maxRedirects: 0) and assert it is refused: status 401, or a 302 to the login page.",
+    ],
+    hints: [
+      "page.request is an APIRequestContext that shares the page's cookies, so after a UI login it is already authenticated. The request fixture is a separate context with no cookies.",
+      "The count element reads like \"(123) Records Found\": const text = await page.getByText(/\\(\\d+\\) Records? Found/).textContent(); const n = Number(text?.match(/\\d+/)?.[0]);",
+      "Parse the API body with await res.json(); the total is body.meta.total and the rows are body.data.",
+      "Playwright follows redirects by default; pass { maxRedirects: 0 } to see the 302 itself.",
+    ],
+    starter:
+      header +
+      `const EMPLOYEES = '/web/index.php/api/v2/pim/employees?limit=50&offset=0&includeEmployees=onlyCurrent';
+
+test('the Employee List count matches the PIM API', async ({ page }) => {
+  await page.goto('/web/index.php/auth/login');
+  // TODO: log in, open the employee list, call the API with page.request and compare
+
+});
+
+test('the API refuses a caller without a session', async ({ request }) => {
+  // TODO: request.get(EMPLOYEES, { maxRedirects: 0 }) and assert 401 or 302
+});
+`,
+    minAssertions: 4,
+    skills: ["Real site", "UI + API", "page.request", "Session reuse"],
+    checks: [
+      { label: "Both tests passed on GitHub Actions", test: (c) => c.result.tests.length >= 2 && c.result.tests.every((t) => t.ok) },
+      { label: "The API is called through page.request (shares the UI session)", test: (c) => codeHas(c, /page\.request\.get\s*\(/) },
+      { label: "The UI count is compared with meta.total", test: (c) => codeHas(c, /meta\.total/) && codeHas(c, /Records? Found/) },
+      { label: "The unauthenticated call expects a 401 or a redirect", test: (c) => codeHas(c, /401/) },
+      { label: "No hard waits (waitForTimeout)", test: (c) => !codeHas(c, /waitForTimeout/) },
+    ],
+  },
+  {
     id: "automationexercise-signup",
     app: "automationexercise",
     title: "Register a user end to end, then delete the account",
@@ -2097,16 +2142,16 @@ const FRAMEWORK_RUBRIC: Check[] = [
   { label: "README explains how to install and run the suite", test: (c) => /playwright\s+(test|install)|npm\s+(test|run)/i.test(c.files["README.md"] || "") },
 ];
 
-/** True when a test in `src` destructures a fixture other than `request` (a page or a page object), so it drives the UI. */
-const usesUiFixtures = (src: string) => Array.from(src.matchAll(/\(\s*\{([^}]*)\}\s*\)\s*=>/g)).some((m: RegExpMatchArray) => m[1].split(",").map((x: string) => x.trim().split(":")[0].trim()).some((name: string) => name !== "" && name !== "request"));
+/** True when a test in `src` destructures a fixture other than `request`/`api` (a page or a page object), so it drives the UI. */
+const usesUiFixtures = (src: string) => Array.from(src.matchAll(/\(\s*\{([^}]*)\}\s*\)\s*=>/g)).some((m: RegExpMatchArray) => m[1].split(",").map((x: string) => x.trim().split(":")[0].trim()).some((name: string) => name !== "" && name !== "request" && name !== "api"));
 
 /** Extra rows for applications that expose a REST API: the framework must cover both layers. */
 const API_RUBRIC: Check[] = [
   { label: "An API client module wraps the REST calls (api/, clients/, services/ or utils/api)", test: (c) => Object.keys(c.files).some((f) => /^(api|clients|services)\/|^utils\/api/.test(f)) },
   { label: "At least one spec covers the API (request fixture or page.request) and at least one test drives the UI", test: (c) => specFiles(c).some(([, s]) => /\brequest\b/.test(stripComments(s))) && specFiles(c).some(([, s]) => usesUiFixtures(stripComments(s))) },
-  { label: "A spec combines both layers: API set-up or verification inside a UI test", test: (c) => specFiles(c).some(([, s]) => /page\.request|\brequest\b/.test(stripComments(s)) && /\b(page|app|loggedIn|inventory|cart|pim|leave|bag|search)\b/.test(stripComments(s)) && /expect\(/.test(s)) },
+  { label: "A spec combines both layers: API set-up or verification inside a UI test", test: (c) => specFiles(c).some(([, s]) => { const src = stripComments(s); return /page\.request|\brequest\b|\bapi\b/.test(src) && usesUiFixtures(src) && /expect\(/.test(src); }) },
 ];
-const APPS_WITH_API: LabAppId[] = ["swagshop", "peopledesk", "trendkart", "automationexercise"];
+const APPS_WITH_API: LabAppId[] = ["swagshop", "peopledesk", "trendkart", "orangehrm", "automationexercise"];
 const frameworkRubric = (app: LabAppId) => (APPS_WITH_API.includes(app) ? [...FRAMEWORK_RUBRIC, ...API_RUBRIC] : FRAMEWORK_RUBRIC);
 
 const workspaceBrief = (appName: string, extra: string) =>
@@ -2117,7 +2162,7 @@ const WORKSPACE_CRITERIA = [
   "pages/ with at least two page objects; fixtures.ts that extends test (for example a logged-in page or a ready page object).",
   "tests/ with at least two spec files and four tests in total, using only fixtures and page objects, grouped with test.describe or tagged @smoke/@regression.",
   "data/ or utils/ for test data and helpers; a README that says how to install and run.",
-  "Where the application has a REST API (the practice apps, AutomationExercise): an API client module, at least one API spec, and a spec that uses the API to set up or verify a UI journey. UI-only frameworks do not pass.",
+  "Where the application has a REST API (the practice apps, OrangeHRM, AutomationExercise): an API client module, at least one API spec, and a spec that uses the API to set up or verify a UI journey. UI-only frameworks do not pass.",
   "Everything green: in the browser for the practice apps, and on GitHub Actions with your own config for every app.",
 ];
 
@@ -2170,7 +2215,7 @@ export const WORKSPACES: Scenario[] = [
   workspace("peopledesk", "workspace-peopledesk", "PeopleDesk HR", "Admin login, employee CRUD with cleanup, leave validation. Show me how you keep test data isolated.", readmeFor("PeopleDesk HR", "the PeopleDesk practice portal (OrangeHRM-style)", "Login: Admin / admin123. Employee data resets when the page reloads, so each test should create what it needs.")),
   workspace("trendkart", "workspace-trendkart", "TrendKart", "Search, filters, sorting and the bag; make the suite data-driven.", readmeFor("TrendKart", "the TrendKart practice marketplace (Myntra-style)", "No login. Prices are rupees with commas, so you will want a parsePrice helper.")),
   workspace("saucedemo", "workspace-saucedemo", "Sauce Demo", "This is the real saucedemo.com. Your config must work on CI, not only on your laptop.", readmeFor("Sauce Demo", "https://www.saucedemo.com", "Users: standard_user, locked_out_user, problem_user, performance_glitch_user / secret_sauce. data-test attributes are the stable hooks."), true),
-  workspace("orangehrm", "workspace-orangehrm", "OrangeHRM", "This is the real OrangeHRM demo. It is slow and shared with the whole internet, so your design must cope with that.", readmeFor("OrangeHRM", "https://opensource-demo.orangehrmlive.com", "Login: Admin / admin123. The demo resets regularly; use unique names (Date.now()) for anything you create. Login lives at /web/index.php/auth/login.")),
+  workspace("orangehrm", "workspace-orangehrm", "OrangeHRM", "This is the real OrangeHRM demo. It is slow and shared with the whole internet, so your design must cope with that. Its screens run on a REST API (/web/index.php/api/v2) that your logged-in session can call: I expect an API layer next to the page objects.", readmeFor("OrangeHRM", "https://opensource-demo.orangehrmlive.com", "Login: Admin / admin123. The demo resets regularly; use unique names (Date.now()) for anything you create. Login lives at /web/index.php/auth/login.")),
   workspace("automationexercise", "workspace-automationexercise", "AutomationExercise", "This is the real automationexercise.com: ads, modals, a UI and a JSON API. I want UI and API tests in the same framework.", readmeFor("AutomationExercise", "https://automationexercise.com", "Register your own users with unique emails and delete them afterwards. The API answers with text/html, so parse JSON from the body text.")),
 ];
 

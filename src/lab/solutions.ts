@@ -1890,6 +1890,116 @@ public class EmployeeTest extends BaseTest {
       "The demo resets regularly, so the test leaves its employee behind on purpose; in a real suite you'd delete it in the fixture's teardown after use().",
     ],
   }),
+  "orangehrm-ui-api-employees": {
+    playwright:
+      pwHeader +
+      `const EMPLOYEES = '/web/index.php/api/v2/pim/employees?limit=50&offset=0&includeEmployees=onlyCurrent&sortField=employee.firstName&sortOrder=ASC';
+
+type EmployeeList = { data: { empNumber: number; firstName: string; lastName: string }[]; meta: { total: number } };
+
+test('the Employee List count matches the PIM API', async ({ page }) => {
+  await page.goto('/web/index.php/auth/login');
+  await page.getByPlaceholder('Username').fill('Admin');
+  await page.getByPlaceholder('Password').fill('admin123');
+  await page.getByRole('button', { name: 'Login' }).click();
+  await expect(page).toHaveURL(/\\/dashboard/);
+
+  // UI layer: the employee list and its record count
+  await page.goto('/web/index.php/pim/viewEmployeeList');
+  const counter = page.getByText(/\\(\\d+\\) Records? Found/);
+  await expect(counter).toBeVisible();
+  const shown = Number((await counter.textContent())?.match(/\\d+/)?.[0]);
+  expect(shown).toBeGreaterThan(0);
+
+  // API layer, through the same browser session (page.request carries the cookies)
+  const res = await page.request.get(EMPLOYEES);
+  expect(res).toBeOK();
+  const body = (await res.json()) as EmployeeList;
+  expect(body.data.length).toBeGreaterThan(0);
+  for (const e of body.data) {
+    expect(e.empNumber).toEqual(expect.any(Number));
+    expect(e.firstName).toEqual(expect.any(String));
+  }
+  // The demo is shared: someone may add an employee between the two reads, so allow a small drift.
+  expect(Math.abs(shown - body.meta.total)).toBeLessThanOrEqual(3);
+});
+
+test('the API refuses a caller without a session', async ({ request }) => {
+  const res = await request.get(EMPLOYEES, { maxRedirects: 0 });
+  // Unauthenticated calls get a 401, or a 302 to the login page depending on the build.
+  expect([401, 302]).toContain(res.status());
+  expect(res.ok()).toBeFalsy();
+});
+`,
+    selenium: `// Selenium Java + REST Assured + TestNG: the browser logs in, REST Assured reuses its session cookie
+// (pom.xml: org.seleniumhq.selenium:selenium-java, io.rest-assured:rest-assured, org.testng:testng, com.google.code.gson:gson)
+import io.restassured.RestAssured;
+import io.restassured.response.Response;
+import org.openqa.selenium.*;
+import org.openqa.selenium.chrome.ChromeDriver;
+import org.openqa.selenium.support.ui.*;
+import org.testng.Assert;
+import org.testng.annotations.*;
+import java.time.Duration;
+import java.util.regex.*;
+import static io.restassured.RestAssured.given;
+
+public class EmployeeListUiApiTest {
+    static final String BASE = "https://opensource-demo.orangehrmlive.com";
+    static final String EMPLOYEES = "/web/index.php/api/v2/pim/employees?limit=50&offset=0&includeEmployees=onlyCurrent";
+    WebDriver driver;
+    WebDriverWait wait;
+
+    @BeforeClass
+    public void setUp() {
+        RestAssured.baseURI = BASE;
+        driver = new ChromeDriver();
+        wait = new WebDriverWait(driver, Duration.ofSeconds(30));
+    }
+
+    @Test
+    public void employeeListCountMatchesApi() {
+        driver.get(BASE + "/web/index.php/auth/login");
+        wait.until(ExpectedConditions.visibilityOfElementLocated(By.name("username"))).sendKeys("Admin");
+        driver.findElement(By.name("password")).sendKeys("admin123");
+        driver.findElement(By.cssSelector("button[type=submit]")).click();
+        wait.until(ExpectedConditions.urlContains("/dashboard"));
+
+        driver.get(BASE + "/web/index.php/pim/viewEmployeeList");
+        WebElement counter = wait.until(ExpectedConditions.visibilityOfElementLocated(By.xpath("//span[contains(., 'Records Found') or contains(., 'Record Found')]")));
+        Matcher m = Pattern.compile("\\\\d+").matcher(counter.getText());
+        Assert.assertTrue(m.find(), counter.getText());
+        int shown = Integer.parseInt(m.group());
+
+        // Same session, other layer: hand the browser's session cookie to REST Assured
+        Cookie session = driver.manage().getCookieNamed("orangehrm");
+        Response res = given().cookie(session.getName(), session.getValue()).get(EMPLOYEES);
+        Assert.assertEquals(res.statusCode(), 200);
+        var body = com.google.gson.JsonParser.parseString(res.asString()).getAsJsonObject();
+        Assert.assertTrue(body.getAsJsonArray("data").size() > 0);
+        int total = body.getAsJsonObject("meta").get("total").getAsInt();
+        Assert.assertTrue(Math.abs(shown - total) <= 3, "UI " + shown + " vs API " + total);
+    }
+
+    @Test
+    public void apiRefusesCallerWithoutSession() {
+        Response res = given().redirects().follow(false).get(EMPLOYEES);
+        Assert.assertTrue(res.statusCode() == 401 || res.statusCode() == 302, "status " + res.statusCode());
+    }
+
+    @AfterClass
+    public void tearDown() {
+        driver.quit();
+    }
+}
+`,
+    notes: [
+      "page.request is the browser context's own APIRequestContext: it sends the cookies the UI login set, so no second login or CSRF dance is needed. The request fixture is a clean context, which is exactly what the negative test wants.",
+      "OrangeHRM's UI calls this same endpoint to render the list, so the comparison proves the screen and the API read the same data. The tolerance exists because the demo database is shared and changes under you.",
+      "Shape assertions (expect.any(Number) for empNumber) catch contract changes without hard-coding demo data that resets every few hours.",
+      "The Selenium version reuses the browser's session cookie in REST Assured: the standard way to combine the layers in a Java stack.",
+    ],
+  },
   "automationexercise-signup": {
     playwright:
       pwHeader +
@@ -3024,6 +3134,37 @@ test.describe('Shopping @regression', () => {
 /** The demo database is shared with the whole internet: every name must be unique. */
 export const newEmployee = () => ({ first: 'Lab', last: 'User' + Date.now().toString().slice(-8) });
 `,
+      "api/hr.api.ts": `import { expect, type APIRequestContext } from '@playwright/test';
+
+export type Employee = { empNumber: number; firstName: string; lastName: string; employeeId: string | null };
+export type EmployeeList = { data: Employee[]; meta: { total: number } };
+
+/**
+ * OrangeHRM's own REST API, the one its screens call. Build it on page.request so the calls carry the
+ * browser's login session; the plain request fixture has no cookies and is refused.
+ */
+export class HrApi {
+  static readonly employees = '/web/index.php/api/v2/pim/employees';
+  constructor(readonly request: APIRequestContext) {}
+
+  async employees(limit = 50): Promise<EmployeeList> {
+    const res = await this.request.get(HrApi.employees, { params: { limit, offset: 0, includeEmployees: 'onlyCurrent', sortField: 'employee.firstName', sortOrder: 'ASC' } });
+    expect(res, 'GET employees').toBeOK();
+    return res.json();
+  }
+
+  async employee(empNumber: number): Promise<Employee> {
+    const res = await this.request.get(\`\${HrApi.employees}/\${empNumber}\`);
+    expect(res, \`GET employee \${empNumber}\`).toBeOK();
+    return (await res.json()).data;
+  }
+
+  /** Best-effort clean-up for employees a test created; the demo resets anyway. */
+  async deleteEmployees(ids: number[]) {
+    return this.request.delete(HrApi.employees, { data: { ids } });
+  }
+}
+`,
       "pages/login.page.ts": `import type { Page } from '@playwright/test';
 
 export class LoginPage {
@@ -3049,13 +3190,30 @@ export class LoginPage {
 
 export class PimPage {
   readonly employeeName;
+  readonly recordsFound;
   constructor(private readonly page: Page) {
     this.employeeName = page.locator('.orangehrm-edit-employee-name h6');
+    this.recordsFound = page.getByText(/\\(\\d+\\) Records? Found/);
   }
 
   async gotoAddEmployee() {
     await this.page.goto('/web/index.php/pim/addEmployee');
     await expect(this.page.getByRole('heading', { name: 'Add Employee' })).toBeVisible();
+  }
+
+  async gotoEmployeeList() {
+    await this.page.goto('/web/index.php/pim/viewEmployeeList');
+    await expect(this.recordsFound).toBeVisible();
+  }
+
+  /** The number in "(N) Records Found" on the employee list. */
+  async recordCount() {
+    return Number((await this.recordsFound.textContent())?.match(/\\d+/)?.[0]);
+  }
+
+  /** empNumber of the employee whose personal details page is open (from /pim/viewPersonalDetails/empNumber/<n>). */
+  currentEmpNumber() {
+    return Number(this.page.url().match(/empNumber\\/(\\d+)/)?.[1]);
   }
 
   async addEmployee(first: string, last: string) {
@@ -3070,11 +3228,12 @@ export class PimPage {
       "fixtures.ts": `import { test as base } from '@playwright/test';
 import { LoginPage } from './pages/login.page';
 import { PimPage } from './pages/pim.page';
+import { HrApi } from './api/hr.api';
 import { admin } from './data/users';
 
 type Pages = { login: LoginPage; pim: PimPage };
 
-export const test = base.extend<{ app: Pages; adminApp: Pages }>({
+export const test = base.extend<{ app: Pages; adminApp: Pages; api: HrApi }>({
   app: async ({ page }, use) => {
     const app = { login: new LoginPage(page), pim: new PimPage(page) };
     await app.login.goto();
@@ -3084,6 +3243,10 @@ export const test = base.extend<{ app: Pages; adminApp: Pages }>({
     await app.login.login(admin.username, admin.password);
     await page.waitForURL(/\\/dashboard/);
     await use(app);
+  },
+  /** The API with the Admin session: depends on adminApp so the UI login has happened first. */
+  api: async ({ adminApp: _app, page }, use) => {
+    await use(new HrApi(page.request));
   },
 });
 
@@ -3122,9 +3285,64 @@ test.describe('PIM @regression', () => {
   });
 });
 `,
+      "tests/api.spec.ts": `import { test, expect } from '../fixtures';
+import { HrApi } from '../api/hr.api';
+
+test.describe('PIM API @regression', () => {
+  test('the employee list returns current employees with the fields the UI needs', async ({ api }) => {
+    const list = await api.employees(10);
+    expect(list.data.length).toBeGreaterThan(0);
+    expect(list.data.length).toBeLessThanOrEqual(10);
+    expect(list.meta.total).toBeGreaterThanOrEqual(list.data.length);
+    for (const e of list.data) {
+      expect(e.empNumber).toEqual(expect.any(Number));
+      expect(e.firstName).toEqual(expect.any(String));
+    }
+  });
+
+  test('a single employee can be read back by empNumber', async ({ api }) => {
+    const [first] = (await api.employees(1)).data;
+    const one = await api.employee(first.empNumber);
+    expect(one.empNumber).toBe(first.empNumber);
+    expect(one.firstName).toBe(first.firstName);
+  });
+
+  test('the API refuses a caller without a session', async ({ request }) => {
+    const res = await request.get(HrApi.employees, { params: { limit: 1 }, maxRedirects: 0 });
+    expect([401, 302]).toContain(res.status());
+  });
+});
+`,
+      "tests/hybrid.spec.ts": `import { test, expect } from '../fixtures';
+import { newEmployee } from '../data/users';
+
+test.describe('UI and API agree @regression', () => {
+  test('the Employee List shows the total the API reports', async ({ adminApp: app, api }) => {
+    await app.pim.gotoEmployeeList();
+    const shown = await app.pim.recordCount();
+    const { meta } = await api.employees(1);
+    // Shared demo: someone may add an employee between the two reads.
+    expect(Math.abs(shown - meta.total)).toBeLessThanOrEqual(3);
+  });
+
+  test('an employee added in the UI is readable through the API', async ({ adminApp: app, api }) => {
+    const e = newEmployee();
+    await app.pim.gotoAddEmployee();
+    await app.pim.addEmployee(e.first, e.last);
+    const empNumber = app.pim.currentEmpNumber();
+    expect(empNumber).toBeGreaterThan(0);
+
+    const fromApi = await api.employee(empNumber);
+    expect(fromApi.firstName).toBe(e.first);
+    expect(fromApi.lastName).toBe(e.last);
+
+    await api.deleteEmployees([empNumber]).catch(() => undefined);
+  });
+});
+`,
     },
     selenium: wsSelenium("OrangeHRM"),
-    notes: [...WS_NOTES, "The demo is slow: timeout and expect.timeout are raised in the config instead of sprinkling waits in tests."],
+    notes: [...WS_NOTES, "The demo is slow: timeout and expect.timeout are raised in the config instead of sprinkling waits in tests.", "api/hr.api.ts wraps the REST API the OrangeHRM screens call. The api fixture builds it on page.request after the adminApp login, so the API calls ride the browser's session; the plain request fixture is kept for the negative test.", "The hybrid spec creates through the UI and verifies through the API (and deletes through the API): the fastest way to prove a screen really persisted what it showed."],
   }),
   "workspace-automationexercise": withFiles({
     files: {

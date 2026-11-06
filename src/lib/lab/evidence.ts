@@ -113,6 +113,7 @@ export async function buildEvidenceDocx(m: ReportModel): Promise<Blob> {
         { label: "Navigation", value: a.byKind.navigation, color: pal.info },
         { label: "Actions", value: a.byKind.action, color: pal.accent },
         { label: "Assertions", value: a.byKind.assertion, color: pal.pass },
+        { label: "API calls", value: a.byKind.api, color: pal.warn },
         { label: "Other", value: a.byKind.step + a.byKind.other, color: pal.muted },
       ],
       { title: "Steps by type", centre: String(a.stepsTotal), sub: "steps", palette: pal },
